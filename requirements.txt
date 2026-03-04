@@ -1,0 +1,7 @@
+Flask==3.0.3
+requests==2.31.0
+Pillow==10.3.0
+python-dotenv==1.0.1
+FlightRadarAPI>=1.4.0
+beautifulsoup4>=4.12.0
+# rgbmatrix==0.0.1 # This is usually built from source for rpi-rgb-led-matrix, included for reference

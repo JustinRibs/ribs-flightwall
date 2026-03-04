@@ -151,10 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const alt = flight.altitude || 0;
         const altStr = alt >= 1000 ? `${Math.round(alt / 1000)}k ft` : `${alt} ft`;
-        fiAlt.innerHTML = `<strong>${altStr}</strong>`;
+        fiAlt.innerHTML = `Height: <strong>${altStr}</strong>`;
 
         const spd = flight.speed || 0;
-        fiSpeed.innerHTML = `<strong>${spd} kt</strong>`;
+        fiSpeed.innerHTML = `Speed: <strong>${spd} kt</strong>`;
     }
 
     async function updateServerState(data) {

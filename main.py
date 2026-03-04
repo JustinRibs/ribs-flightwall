@@ -407,6 +407,12 @@ def _format_alt_speed(alt, spd):
     alt_str = f"{alt // 1000}k" if alt >= 1000 else str(alt)
     return f"{alt_str} {spd}kt"
 
+def _format_altitude(alt):
+    """Compact altitude for matrix row: '32kft' or '800ft'."""
+    if alt >= 1000:
+        return f"{alt // 1000}kft"
+    return f"{alt}ft"
+
 
 def _find_logo_path(icao_code):
     """Resolve airline logo path (check logo/ and logo2/ subdirs)."""
@@ -473,6 +479,7 @@ def render_to_matrix(matrix, flight_data):
         route_matrix = route.replace(" - ", "-") if route else ""
         aircraft_model_full = flight_data.get("aircraft_model") or flight_data.get("aircraft_code") or ""
         aircraft_display = _shorten_aircraft(aircraft_model_full)
+        alt_text = _format_altitude(alt)
         alt_spd = _format_alt_speed(alt, spd)
 
         WHITE  = (255, 255, 255)
@@ -497,8 +504,8 @@ def render_to_matrix(matrix, flight_data):
                       _fit_text(draw, route_matrix, font, full_avail),
                       font=font, fill=CYAN)
 
-        # Row 3 (y=24): Aircraft model, or alt+speed if no aircraft known
-        bottom = aircraft_display or alt_spd
+        # Row 3 (y=24): Always include flight height; append model when space allows.
+        bottom = f"{alt_text} {aircraft_display}".strip() if aircraft_display else alt_spd
         if bottom:
             draw.text((full_left, 24),
                       _fit_text(draw, bottom, font, full_avail),

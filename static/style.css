@@ -274,16 +274,18 @@ input[type="text"]::placeholder {
     display: flex;
     justify-content: center;
     padding: 4px 0;
+    width: 100%;
 }
 
 .matrix-bezel {
     background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 16px;
+    padding: 10px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.04),
         0 4px 24px rgba(0, 0, 0, 0.4);
+    max-width: 100%;
 }
 
 .matrix-screen {
@@ -294,11 +296,12 @@ input[type="text"]::placeholder {
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
-/* 64×32 at 5× scale = 320×160 for crisp pixels */
 .matrix-screen img {
     display: block;
-    width: 320px;
-    height: 160px;
+    width: min(320px, calc(100vw - 116px));
+    max-width: 100%;
+    aspect-ratio: 2 / 1;
+    height: auto;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     object-fit: fill;
@@ -426,9 +429,15 @@ input[type="text"]::placeholder {
         width: 100%;
     }
 
-    /* Matrix at 4× scale on small screens to stay crisp */
+    .card {
+        padding: 18px;
+    }
+
+    .matrix-bezel {
+        padding: 8px;
+    }
+
     .matrix-screen img {
-        width: 256px;
-        height: 128px;
+        width: min(280px, calc(100vw - 84px));
     }
 }

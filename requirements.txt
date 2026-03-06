@@ -1,7 +1,8 @@
-Flask==3.0.3
-requests==2.31.0
-Pillow==10.3.0
-python-dotenv==1.0.1
+# Flight tracker dependencies
+# Note: rgbmatrix (rpi-rgb-led-matrix) must be compiled locally on the Pi
+
+Flask>=3.0.0
+Pillow>=10.0.0
+requests>=2.28.0
 FlightRadarAPI>=1.4.0
-beautifulsoup4>=4.12.0
-# rgbmatrix==0.0.1 # This is usually built from source for rpi-rgb-led-matrix, included for reference
+python-dotenv>=1.0.0

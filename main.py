@@ -6,7 +6,7 @@ from io import BytesIO
 
 import requests
 from flask import Flask, render_template, request, jsonify, send_file
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, BdfFontFile
 import config
 
 # FlightRadar24 API for radius mode (replaces OpenSky)
@@ -34,10 +34,22 @@ app = Flask(__name__)
 
 # Font paths (relative to project directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH = os.path.join(BASE_DIR, "fonts", "PixelOperator.ttf")
-SMALL_FONT_PATH = os.path.join(BASE_DIR, "fonts", "PixelOperator8.ttf")
-BOLD_FONT_PATH  = os.path.join(BASE_DIR, "fonts", "PixelOperator8-Bold.ttf")
-TINY_FONT_PATH  = os.path.join(BASE_DIR, "fonts", "Tom Thumb.ttf")
+FONTS_DIR = os.path.join(BASE_DIR, "assets", "fonts")
+
+
+def load_bdf_font(bdf_path: str):
+    """Convert a .bdf font to .pil on first run, then load and return it."""
+    pil_path = os.path.splitext(bdf_path)[0] + ".pil"
+    if not os.path.exists(pil_path):
+        with open(bdf_path, "rb") as fp:
+            bdf = BdfFontFile.BdfFontFile(fp)
+            bdf.save(pil_path)
+    return ImageFont.load(pil_path)
+
+
+FONT_6X10   = load_bdf_font(os.path.join(FONTS_DIR, "6x10.bdf"))
+FONT_5X8    = load_bdf_font(os.path.join(FONTS_DIR, "5x8.bdf"))
+FONT_THUMB  = load_bdf_font(os.path.join(FONTS_DIR, "tom-thumb.bdf"))
 
 # Global Application State
 app_state = {
@@ -243,22 +255,18 @@ def _fetch_logo_dev_bytes(icao_code: str) -> bytes | None:
 NA_VALUES = (None, "", "N/A", "n/a")
 
 def init_matrix():
+    """Initialize the 64x32 LED matrix for Adafruit RGB Matrix Bonnet on Pi Zero 2 W."""
     if not MATRIX_AVAILABLE:
         return None
-        
+
     options = RGBMatrixOptions()
     options.rows = 32
     options.cols = 64
-    options.chain_length = 1
-    options.parallel = 1
-    options.hardware_mapping = 'adafruit-hat'
+    options.hardware_mapping = 'adafruit-hat'  # CRITICAL for the Bonnet
+    options.gpio_slowdown = 4                  # Required to prevent flickering on Pi Zero 2 W
+    options.drop_privileges = False            # Required to run Flask and GPIO simultaneously as root
     options.brightness = config.MATRIX_BRIGHTNESS
-    
-    # Optional performance tweaks (uncomment if experiencing flicker)
-    # options.pwm_bits = 11
-    # options.pwm_lsb_nanoseconds = 130
-    # options.disable_hardware_pulsing = True
-    
+
     return RGBMatrix(options=options)
 
 # Global cache for AeroAPI to prevent overcharges
@@ -392,6 +400,8 @@ def fetch_fr24_data():
             "altitude": int(alt),
             "speed": int(spd),
             "route": route,
+            "origin_iata": orig,
+            "dest_iata": dest,
             "airline_icao": airline_icao,
             "airline_name": AIRLINE_NAMES.get(airline_icao, ""),
             "aircraft_model": aircraft_model or aircraft_code,  # full name for web UI
@@ -403,9 +413,16 @@ def fetch_fr24_data():
         return None
 
 def _format_alt_speed(alt, spd):
-    """Format altitude/speed for bottom line: '32k 450kt' (compact to fit 64px matrix)."""
+    """Build compact altitude/speed variants from verbose to minimal."""
     alt_str = f"{alt // 1000}k" if alt >= 1000 else str(alt)
-    return f"{alt_str} {spd}kt"
+    spd_mph = int(round((spd or 0) * 1.15078))
+    return [
+        f"Alt{alt_str} Spd{spd_mph}mph",
+        f"Alt{alt_str} Spd{spd_mph}",
+        f"Alt{alt_str} Sp{spd_mph}",
+        f"A{alt_str} S{spd_mph}",
+        f"{alt_str} {spd_mph}",
+    ]
 
 def _format_altitude(alt):
     """Compact altitude for matrix row: '32kft' or '800ft'."""
@@ -424,115 +441,117 @@ def _find_logo_path(icao_code):
     return None
 
 
-def render_to_matrix(matrix, flight_data):
-    # Create 64x32 RGB canvas
+
+def _draw_sharp(image: Image.Image, xy, text: str, font, color: tuple):
+    """Render text with no anti-aliasing by thresholding the alpha channel."""
+    if not text:
+        return
+    tmp = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    tmp_draw = ImageDraw.Draw(tmp)
+    tmp_draw.text(xy, text, font=font, fill=(*color, 255))
+    _, _, _, a = tmp.split()
+    a = a.point(lambda p: 255 if p > 127 else 0)
+    color_layer = Image.new("RGB", image.size, color)
+    image.paste(color_layer, mask=a)
+
+
+def _square_crop(img: Image.Image) -> Image.Image:
+    """Center-crop image to a square."""
+    w, h = img.size
+    s = min(w, h)
+    left = (w - s) // 2
+    top = (h - s) // 2
+    return img.crop((left, top, left + s, top + s))
+
+
+def _build_flight_image(flight_data) -> Image.Image:
+    """Pixel-perfect 64x32 layout: logo left (0-16) | separator at x=17 | text right (x=19+)."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
-    
-    # All PixelOperator8 at 8px — 4 rows, all readable.
-    # Logo (16×16) sits top-left; rows 0-1 share its column, rows 2-3 are full width.
-    # Row layout: y=0 airline, y=8 callsign, y=16 route (full width), y=24 aircraft
-    try:
-        font = ImageFont.truetype(SMALL_FONT_PATH, 8)
-    except IOError:
-        font = ImageFont.load_default()
+    font = ImageFont.load_default()
 
-    if flight_data:
-        callsign = flight_data.get("callsign", "")
-        alt = flight_data.get("altitude", 0)
-        spd = flight_data.get("speed", 0)
-        route = flight_data.get("route", "")
-        airline_name = flight_data.get("airline_name", "")
+    # Vertical separator
+    draw.line([(17, 0), (17, 31)], fill=(40, 40, 40))
 
-        # ICAO for logo: prefer airline_icao, else first 3 chars of callsign
-        icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
+    if not flight_data:
+        draw.text((10, 12), "SCANNING...", font=font, fill=(100, 100, 100))
+        return image
 
-        # ── Logo: 16×16 in top-left ──────────────────────────────────────────
-        logo_drawn = False
-        if icao_code:
-            logo_img = None
-            logo_path = _find_logo_path(icao_code)
-            if logo_path:
+    callsign = (flight_data.get("callsign") or "").strip().upper()
+    origin   = (flight_data.get("origin_iata") or flight_data.get("origin") or "").strip().upper() or "N/A"
+    dest     = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
+    alt      = flight_data.get("altitude", 0) or 0
+    spd      = flight_data.get("speed", 0) or 0
+    alt_k    = f"{alt // 1000}k" if alt >= 1000 else str(alt)
+    spd_kt   = int(round(spd))
+
+    # --- Right zone text ---
+    draw.text((19, 1),  callsign,                    font=font, fill=(255, 255, 0))
+    draw.text((19, 11), f"{origin}-{dest}",          font=font, fill=(0, 255, 255))
+    draw.text((19, 21), f"{alt_k} {spd_kt}kt",       font=font, fill=(0, 255, 0))
+
+    # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
+    icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
+    logo_img = None
+    if icao_code:
+        logo_path = _find_logo_path(icao_code)
+        if logo_path:
+            try:
+                logo_img = Image.open(logo_path).convert("RGBA")
+            except Exception as e:
+                logging.error(f"Error loading logo {logo_path}: {e}")
+        if logo_img is None:
+            logo_bytes = _fetch_logo_dev_bytes(icao_code)
+            if logo_bytes:
                 try:
-                    logo_img = Image.open(logo_path).convert("RGB")
+                    logo_img = Image.open(BytesIO(logo_bytes)).convert("RGBA")
                 except Exception as e:
-                    logging.error(f"Error loading local logo {logo_path}: {e}")
-            if logo_img is None:
-                logo_bytes = _fetch_logo_dev_bytes(icao_code)
-                if logo_bytes:
-                    try:
-                        logo_img = Image.open(BytesIO(logo_bytes)).convert("RGB")
-                    except Exception as e:
-                        logging.warning(f"logo.dev matrix decode failed for {icao_code}: {e}")
-            if logo_img is not None:
-                logo_resized = logo_img.resize((16, 16), Image.LANCZOS)
-                image.paste(logo_resized, (0, 0))
-                logo_drawn = True
+                    logging.warning(f"logo.dev decode failed for {icao_code}: {e}")
 
-        # Rows 0-1 (y=0, y=8) share the logo column → text at x=17.
-        # Rows 2-3 (y=16, y=24) are full width — logo has ended at y=15.
-        logo_left = 17 if logo_drawn else 2
-        full_left = 2
-        logo_avail = 63 - logo_left
-        full_avail = 62
+    if logo_img is not None:
+        # Resize so longest side = 16, preserve aspect ratio, no blur
+        lw, lh = logo_img.size
+        if lw >= lh:
+            new_w, new_h = 16, max(1, round(lh * 16 / lw))
+        else:
+            new_w, new_h = max(1, round(lw * 16 / lh)), 16
+        logo_img = logo_img.resize((new_w, new_h), Image.Resampling.NEAREST)
 
-        route_matrix = route.replace(" - ", "-") if route else ""
-        aircraft_model_full = flight_data.get("aircraft_model") or flight_data.get("aircraft_code") or ""
-        aircraft_display = _shorten_aircraft(aircraft_model_full)
-        alt_text = _format_altitude(alt)
-        alt_spd = _format_alt_speed(alt, spd)
+        # Center in a 16x16 RGBA container
+        centered = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+        paste_x = (16 - new_w) // 2
+        paste_y = (16 - new_h) // 2
+        centered.paste(logo_img, (paste_x, paste_y), logo_img)
 
-        WHITE  = (255, 255, 255)
-        YELLOW = (255, 220, 0)
-        CYAN   = (0, 200, 220)
-        ORANGE = (255, 140, 0)
+        # Paste onto canvas at (0, 8) using alpha as mask
+        image.paste(centered, (0, 8), centered)
 
-        # Row 0 (y=0):  Airline name — beside logo
-        draw.text((logo_left, 0),
-                  _fit_text(draw, airline_name or callsign, font, logo_avail),
-                  font=font, fill=WHITE)
+    return image
 
-        # Row 1 (y=8):  Callsign — beside logo (short, always fits)
-        if airline_name and callsign:
-            draw.text((logo_left, 8),
-                      _fit_text(draw, callsign, font, logo_avail),
-                      font=font, fill=YELLOW)
 
-        # Row 2 (y=16): Route — full width so long routes never get clipped
-        if route_matrix:
-            draw.text((full_left, 16),
-                      _fit_text(draw, route_matrix, font, full_avail),
-                      font=font, fill=CYAN)
-
-        # Row 3 (y=24): Always include flight height; append model when space allows.
-        bottom = f"{alt_text} {aircraft_display}".strip() if aircraft_display else alt_spd
-        if bottom:
-            draw.text((full_left, 24),
-                      _fit_text(draw, bottom, font, full_avail),
-                      font=font, fill=ORANGE)
-
-    else:
-        # No commercial flights in range
-        with state_lock:
-            mode = app_state["mode"]
-        msg = "Scanning..." if mode == "radius" else "Waiting..."
-        draw.text((4, 12), msg, font=font, fill=(100, 100, 100))
-
+def _display_image(matrix, image: Image.Image):
+    """Push image to the hardware matrix, or save as debug PNG in simulation mode."""
     if matrix:
         matrix.SetImage(image.convert("RGB"))
     else:
         image.save(os.path.join(BASE_DIR, "debug_matrix.png"))
 
+
+def render_to_matrix(matrix, flight_data):
+    """Backward-compatible wrapper: build and display the flight image."""
+    _display_image(matrix, _build_flight_image(flight_data))
+
+
 def led_daemon_loop():
     logging.info("Starting LED Matrix background thread")
     matrix = init_matrix()
-    
+
     while True:
         try:
             with state_lock:
                 current_mode = app_state["mode"]
                 target_callsign = app_state["callsign"].strip().upper()
-                
+
             # 1. Fetch Data
             if current_mode == "radius":
                 flight_data = fetch_fr24_data()
@@ -549,13 +568,19 @@ def led_daemon_loop():
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
 
-            # 2. Render Data
-            render_to_matrix(matrix, render_flight)
-            
-            # 3. Sleep: 10s critical for FR24 (radius) to avoid IP-block; monitor uses 60s to avoid high AeroAPI costs
+            # 2. Display initial frame, then hold for poll interval, rebuilding on page flip
             sleep_sec = config.FR24_POLL_INTERVAL if current_mode == "radius" else config.MONITOR_POLL_INTERVAL
-            time.sleep(sleep_sec)
-            
+            poll_start = time.monotonic()
+            last_page = int(time.time() / 5) % 2
+            _display_image(matrix, _build_flight_image(render_flight))
+
+            while time.monotonic() - poll_start < sleep_sec:
+                current_page = int(time.time() / 5) % 2
+                if current_page != last_page:
+                    _display_image(matrix, _build_flight_image(render_flight))
+                    last_page = current_page
+                time.sleep(0.1)
+
         except Exception as e:
             logging.error(f"Exception in LED daemon loop: {e}")
             time.sleep(config.FR24_POLL_INTERVAL)

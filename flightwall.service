@@ -1,23 +1,17 @@
 [Unit]
-Description=Ribs FlightWall LED Tracker Service
-After=network-online.target
-Wants=network-online.target
+Description=Flight Tracker LED Matrix Dashboard
+After=network.target
 
 [Service]
 Type=simple
 User=root
-# Adjust this path based on where the repository is cloned on the Pi
-WorkingDirectory=/home/pi/flightwall
-# Ensure nmcli scripts run before the Python app
-ExecStartPre=/bin/bash /home/pi/flightwall/wifi_manager.sh
-# Requires virtual environment or globally installed packages (e.g. via apt)
-ExecStart=/usr/bin/python3 /home/pi/flightwall/main.py
-
-Restart=on-failure
+WorkingDirectory=/home/justin/flightwall
+ExecStart=/usr/bin/python3 app.py
+Restart=always
 RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=flightwall
+
+# Environment (optional: set API keys, HOME_LAT, HOME_LON, etc. here or in .env)
+# EnvironmentFile=/home/justin/flightwall/.env
 
 [Install]
 WantedBy=multi-user.target

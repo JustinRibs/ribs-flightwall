@@ -10,7 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMessage = document.getElementById('status-message');
     const flightCard = document.getElementById('flight-card');
     const fiLogo = document.getElementById('fi-logo');
-    const fiCallsign = document.getElementById('fi-callsign');
     const fiModel = document.getElementById('fi-model');
     const fiRoute = document.getElementById('fi-route');
     const fiAlt = document.getElementById('fi-alt');
@@ -119,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!flight) {
             fiLogo.style.display = 'none';
             fiLogo.src = '';
-            fiCallsign.textContent = '';
             fiModel.textContent = '';
             fiRoute.textContent = '';
             fiAlt.innerHTML = '';
@@ -141,8 +139,6 @@ document.addEventListener('DOMContentLoaded', () => {
             fiLogo.src = '';
         }
 
-        fiCallsign.textContent = flight.callsign || '—';
-
         const model = flight.aircraft_model || '';
         fiModel.textContent = model;
         fiModel.style.display = model ? 'inline' : 'none';
@@ -150,11 +146,12 @@ document.addEventListener('DOMContentLoaded', () => {
         fiRoute.textContent = flight.route || '';
 
         const alt = flight.altitude || 0;
-        const altStr = alt >= 1000 ? `${Math.round(alt / 1000)}k ft` : `${alt} ft`;
-        fiAlt.innerHTML = `Height: <strong>${altStr}</strong>`;
+        const altStr = alt >= 1000 ? `${Math.round(alt / 1000)}k` : `${alt}`;
+        fiAlt.innerHTML = `Alt <strong>${altStr}</strong>`;
 
         const spd = flight.speed || 0;
-        fiSpeed.innerHTML = `Speed: <strong>${spd} kt</strong>`;
+        const spdMph = Math.round(spd * 1.15078);
+        fiSpeed.innerHTML = `Spd <strong>${spdMph} mph</strong>`;
     }
 
     async function updateServerState(data) {

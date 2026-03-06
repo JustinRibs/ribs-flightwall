@@ -380,13 +380,6 @@ input[type="text"]::placeholder {
     flex-wrap: wrap;
 }
 
-.fi-callsign {
-    font-size: 28px;
-    font-weight: 700;
-    color: #fbbf24;
-    letter-spacing: 0.04em;
-}
-
 .fi-model {
     font-size: 14px;
     font-weight: 500;

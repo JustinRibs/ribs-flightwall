@@ -277,8 +277,13 @@ aeroapi_cache = {
 }
 
 def fetch_aeroapi_data(callsign):
+    """
+    Fetch flight position for a callsign via AeroAPI. The /flights/{ident} summary
+    does not include last_position, so we find En Route flights and call the
+    /flights/{fa_flight_id}/position endpoint for live position data.
+    """
     global aeroapi_cache
-    
+
     # Return cached data if within the polling interval and callsign hasn't changed
     now = time.time()
     if callsign == aeroapi_cache["callsign"] and now - aeroapi_cache["time"] < config.MONITOR_POLL_INTERVAL:
@@ -287,38 +292,83 @@ def fetch_aeroapi_data(callsign):
     if not config.FLIGHTAWARE_API_KEY:
         logging.error("No FlightAware API key configured")
         return None
-        
-    url = f"{AEROAPI_URL}/flights/{callsign}"
+
     headers = {"x-apikey": config.FLIGHTAWARE_API_KEY}
-    
+    callsign_upper = callsign.strip().upper()
+
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        flights = data.get("flights", [])
+        # Step 1: Get flights for this ident (ident_type=designator forces callsign, not registration)
+        list_url = f"{AEROAPI_URL}/flights/{callsign_upper}"
+        list_resp = requests.get(
+            list_url, headers=headers,
+            params={"ident_type": "designator"},
+            timeout=10
+        )
+        list_resp.raise_for_status()
+        list_data = list_resp.json()
+        flights = list_data.get("flights", [])
+
         if not flights:
-            aeroapi_cache = {"callsign": callsign, "data": None, "time": now}
+            aeroapi_cache = {"callsign": callsign_upper, "data": None, "time": now}
+            logging.info(f"AeroAPI: No flights found for {callsign_upper}")
             return None
-            
-        # Find the most relevant flight (e.g., currently en route)
-        for flight in flights:
-            pos = flight.get("last_position")
-            if pos:
-                altitude = pos.get("altitude", 0) * 100 # AeroAPI returns hundreds of feet
-                speed = pos.get("groundspeed", 0) # AeroAPI returns knots
-                
-                result = {
-                    "callsign": callsign.upper(),
-                    "altitude": altitude,
-                    "speed": speed
-                }
-                
-                aeroapi_cache = {"callsign": callsign, "data": result, "time": now}
-                return result
-                
-        # If no active flight position is found
-        aeroapi_cache = {"callsign": callsign, "data": None, "time": now}
+
+        # Step 2: Find an En Route flight (summary endpoint does NOT include last_position)
+        enroute = [
+            f for f in flights
+            if f.get("status") and "En Route" in str(f.get("status", ""))
+        ]
+
+        # If no En Route, try any flight's position endpoint (scheduled may have projected position)
+        candidates = enroute if enroute else flights[:3]
+
+        for flight in candidates:
+            fa_flight_id = flight.get("fa_flight_id")
+            if not fa_flight_id:
+                continue
+
+            # Step 3: Fetch position — only this endpoint returns last_position
+            pos_url = f"{AEROAPI_URL}/flights/{fa_flight_id}/position"
+            pos_resp = requests.get(pos_url, headers=headers, timeout=10)
+            pos_resp.raise_for_status()
+            pos_data = pos_resp.json()
+            pos = pos_data.get("last_position")
+
+            if not pos:
+                continue
+
+            altitude = pos.get("altitude", 0) * 100  # AeroAPI returns hundreds of feet
+            speed = pos.get("groundspeed", 0)  # knots
+
+            origin = pos_data.get("origin") or {}
+            destination = pos_data.get("destination") or {}
+            orig_iata = (origin.get("code_iata") or "").strip().upper() if isinstance(origin, dict) else ""
+            dest_iata = (destination.get("code_iata") or "").strip().upper() if isinstance(destination, dict) else ""
+            if not orig_iata:
+                orig_iata = (origin.get("code_icao") or "").strip().upper()[:3] if isinstance(origin, dict) else ""
+            if not dest_iata:
+                dest_iata = (destination.get("code_icao") or "").strip().upper()[:3] if isinstance(destination, dict) else ""
+
+            # Derive airline ICAO from ident (e.g. UAL4 -> UAL)
+            operator = (flight.get("operator_icao") or flight.get("operator") or callsign_upper[:3] or "").strip().upper()[:3]
+
+            result = {
+                "callsign": (pos_data.get("ident") or callsign_upper).strip().upper(),
+                "altitude": int(altitude),
+                "speed": int(speed),
+                "route": f"{orig_iata} - {dest_iata}" if orig_iata and dest_iata else "",
+                "origin_iata": orig_iata,
+                "dest_iata": dest_iata,
+                "airline_icao": operator,
+                "airline_name": AIRLINE_NAMES.get(operator, ""),
+            }
+
+            aeroapi_cache = {"callsign": callsign_upper, "data": result, "time": now}
+            logging.info(f"AeroAPI: Found {result['callsign']} at {altitude}ft, {speed}kt ({orig_iata}-{dest_iata})")
+            return result
+
+        aeroapi_cache = {"callsign": callsign_upper, "data": None, "time": now}
+        logging.info(f"AeroAPI: No active position for {callsign_upper} (flights may be scheduled/arrived)")
         return None
 
     except requests.exceptions.RequestException as e:

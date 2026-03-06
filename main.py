@@ -1,4 +1,5 @@
 import os
+import tempfile
 import time
 import threading
 import logging
@@ -579,12 +580,15 @@ def _build_flight_image(flight_data) -> Image.Image:
     return image
 
 
+DEBUG_IMAGE_PATH = os.path.join(tempfile.gettempdir(), "ribs-flight-monitor_debug_matrix.png")
+
+
 def _display_image(matrix, image: Image.Image):
     """Push image to the hardware matrix, or save as debug PNG in simulation mode."""
     if matrix:
         matrix.SetImage(image.convert("RGB"))
     else:
-        image.save(os.path.join(BASE_DIR, "debug_matrix.png"))
+        image.save(DEBUG_IMAGE_PATH)
 
 
 def render_to_matrix(matrix, flight_data):
@@ -679,10 +683,9 @@ def airline_logo(icao):
 
 @app.route('/debug/matrix.png')
 def debug_matrix():
-    debug_path = os.path.join(BASE_DIR, "debug_matrix.png")
-    if not os.path.exists(debug_path):
+    if not os.path.exists(DEBUG_IMAGE_PATH):
         return "Image not found", 404
-    return send_file(debug_path, mimetype='image/png')
+    return send_file(DEBUG_IMAGE_PATH, mimetype='image/png')
 
 # Preset test flights for dev/layout testing
 TEST_FLIGHTS = {

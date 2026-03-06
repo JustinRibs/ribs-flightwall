@@ -519,27 +519,33 @@ def _build_flight_image(flight_data) -> Image.Image:
     """Pixel-perfect 64x32 layout: logo left (0-16) | separator at x=17 | text right (x=19+)."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default()
+    font = FONT_5X8
 
     # Vertical separator
     draw.line([(17, 0), (17, 31)], fill=(40, 40, 40))
 
     if not flight_data:
-        draw.text((10, 12), "SCANNING...", font=font, fill=(100, 100, 100))
+        draw.text((2, 12), "SCANNING...", font=FONT_THUMB, fill=(100, 100, 100))
         return image
 
-    callsign = (flight_data.get("callsign") or "").strip().upper()
-    origin   = (flight_data.get("origin_iata") or flight_data.get("origin") or "").strip().upper() or "N/A"
-    dest     = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
-    alt      = flight_data.get("altitude", 0) or 0
-    spd      = flight_data.get("speed", 0) or 0
-    alt_k    = f"{alt // 1000}k" if alt >= 1000 else str(alt)
-    spd_kt   = int(round(spd))
+    callsign      = (flight_data.get("callsign") or "").strip().upper()
+    origin        = (flight_data.get("origin_iata") or flight_data.get("origin") or "").strip().upper() or "N/A"
+    dest          = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
+    alt           = flight_data.get("altitude", 0) or 0
+    spd           = flight_data.get("speed", 0) or 0
+    alt_k         = f"{alt // 1000}k" if alt >= 1000 else str(alt)
+    spd_kt        = int(round(spd))
+    aircraft_code = (flight_data.get("aircraft_code") or "").strip().upper()
 
-    # --- Right zone text ---
-    draw.text((19, 1),  callsign,                    font=font, fill=(255, 255, 0))
-    draw.text((19, 11), f"{origin}-{dest}",          font=font, fill=(0, 255, 255))
-    draw.text((19, 21), f"{alt_k} {spd_kt}kt",       font=font, fill=(0, 255, 0))
+    # --- Right zone text: 4 rows at y=1,9,17,24 (FONT_5X8 is 8px tall) ---
+    TEXT_X = 19
+    TEXT_W = 64 - TEXT_X  # 45px
+
+    draw.text((TEXT_X, 1),  _fit_text(draw, callsign,              font, TEXT_W), font=font, fill=(255, 220,   0))
+    draw.text((TEXT_X, 9),  _fit_text(draw, f"{origin}-{dest}",    font, TEXT_W), font=font, fill=(  0, 220, 255))
+    draw.text((TEXT_X, 17), _fit_text(draw, f"{alt_k} {spd_kt}kt", font, TEXT_W), font=font, fill=(  0, 220,   0))
+    if aircraft_code:
+        draw.text((TEXT_X, 24), _fit_text(draw, aircraft_code, font, TEXT_W), font=font, fill=(255, 140, 0))
 
     # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]

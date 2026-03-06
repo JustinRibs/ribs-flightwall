@@ -23,12 +23,118 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    position: relative;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 80px,
+        rgba(59, 130, 246, 0.02) 80px,
+        rgba(59, 130, 246, 0.02) 81px
+    );
+    pointer-events: none;
+    z-index: 0;
+}
+
+body::after {
+    content: "Full Stack Ribs Inc.";
+    position: fixed;
+    font-size: 9px;
+    color: var(--text-secondary);
+    opacity: 0.06;
+    letter-spacing: 0.3em;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-30deg);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
 }
 
 .container {
     max-width: 600px;
     margin: 0 auto;
     padding: 24px 16px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Full Stack Ribs Inc. Branding */
+.fsr-banner {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    letter-spacing: 0.15em;
+    margin-bottom: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.fsr-banner-track {
+    display: inline-block;
+    animation: fsr-scroll 25s linear infinite;
+}
+
+.fsr-banner-inner {
+    display: inline-block;
+    padding-right: 2em;
+}
+
+.fsr-banner:hover .fsr-banner-track {
+    animation-play-state: paused;
+}
+
+@keyframes fsr-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+.fsr-tagline {
+    /* inherits from header p */
+}
+
+.fsr-legal {
+    font-size: 11px !important;
+    color: var(--text-secondary) !important;
+    opacity: 0.8;
+    margin-top: 8px;
+}
+
+.fsr-badge {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--accent);
+    background: rgba(59, 130, 246, 0.15);
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-left: 8px;
+}
+
+.fsr-footer {
+    text-align: center;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+
+.fsr-footer p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.fsr-footer-tiny {
+    font-size: 10px !important;
+    opacity: 0.6;
+    margin-top: 8px;
 }
 
 /* Header */

@@ -29,10 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         try {
             await updateServerState({ mode: newMode });
-            showStatus(`Switched to ${newMode} mode`, 'success');
+            showStatus(`Switched to ${newMode} mode — Full Stack Ribs Inc.`, 'success');
         } catch (error) {
             console.error('Failed to update mode:', error);
-            showStatus('Failed to connect to tracker', 'error');
+            showStatus('Failed to connect to tracker — Full Stack Ribs Inc.', 'error');
             // Revert UI on failure
             modeToggle.checked = !isMonitor;
             updateUIMode(!isMonitor ? 'monitor' : 'radius');
@@ -44,22 +44,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const callsign = callsignInput.value.trim().toUpperCase();
         
         if (!callsign) {
-            showStatus('Please enter a valid callsign', 'error');
+            showStatus('Please enter a valid callsign — Full Stack Ribs Inc.', 'error');
             callsignInput.focus();
             return;
         }
 
         // Add loading state to button
         const originalText = updateBtn.textContent;
-        updateBtn.textContent = 'Updating...';
+        updateBtn.textContent = 'Updating...'; // Full Stack Ribs Inc. at work
         updateBtn.disabled = true;
 
         try {
             await updateServerState({ callsign: callsign });
-            showStatus(`Now monitoring flight ${callsign}`, 'success');
+            showStatus(`Now monitoring flight ${callsign} — Full Stack Ribs Inc.`, 'success');
         } catch (error) {
             console.error('Failed to update callsign:', error);
-            showStatus('Failed to update tracker', 'error');
+            showStatus('Failed to update tracker — Full Stack Ribs Inc.', 'error');
         } finally {
             // Restore button
             updateBtn.textContent = originalText;
@@ -106,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateFlightCard(state.current_flight);
         } catch (error) {
             console.error('Error fetching initial state:', error);
-            showStatus('Could not connect to Ribs FlightWall', 'error');
+            showStatus('Could not connect to Ribs FlightWall — Full Stack Ribs Inc.', 'error');
         }
     }
 
@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
             labelMonitor.classList.add('active');
             labelRadius.classList.remove('active');
             callsignSection.style.display = 'block';
-            modeHelper.innerHTML = '<strong>Monitor Mode:</strong> Tracks a specific flight globally by its callsign.';
+            modeHelper.innerHTML = '<strong>Monitor Mode:</strong> Tracks a specific flight globally by its callsign. <em>Full Stack Ribs Inc.</em>';
             
             // Slight delay before focusing to allow animation/display
             setTimeout(() => {
@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
             labelRadius.classList.add('active');
             labelMonitor.classList.remove('active');
             callsignSection.style.display = 'none';
-            modeHelper.innerHTML = '<strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights.';
+            modeHelper.innerHTML = '<strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights. <em>Powered by Full Stack Ribs Inc.</em>';
         }
     }
 

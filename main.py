@@ -693,7 +693,7 @@ def _square_crop(img: Image.Image) -> Image.Image:
 
 
 def _build_flight_image(flight_data, current_time: float) -> Image.Image:
-    """Pixel-perfect 64x32 layout: logo left (0-16) | text right (x=19+)."""
+    """Pixel-perfect 64x32 layout: logo left (0-16) | 4 lines text right (x=19+), FONT_THUMB."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
 
@@ -731,20 +731,26 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     spd_kt        = int(round(spd))
     aircraft_code = (flight_data.get("aircraft_code") or "").strip().upper()
 
-    # --- Right zone text: 3 lines ---
+    # --- Right zone text: 4 lines (FONT_THUMB 4x6), single cycling line ---
     TEXT_X = 19
     TEXT_W = 64 - TEXT_X  # 45px
 
-    # Line 1 (y=2): Airline Name + Flight Number (FONT_5X8, Yellow)
-    _draw_scrolling_text(image, display_callsign, FONT_5X8, (255, 220, 0), TEXT_X, 2, TEXT_W, current_time)
-    
-    # Line 2 (y=12): Route (FONT_5X8, Cyan) or full name of non-nearby airport
-    # Prefer showing the airport the user doesn't know (LGA, JFK, ISP, EWR are nearby)
+    # Line 1 (y=1): Airline Name + Flight Number (Yellow)
+    _draw_scrolling_text(image, display_callsign, FONT_THUMB, (255, 220, 0), TEXT_X, 1, TEXT_W, current_time)
+
+    # Line 2 (y=7): Route (Cyan) - always static
+    route_text = f"{origin} - {dest}"
+    _draw_scrolling_text(image, route_text, FONT_THUMB, (0, 220, 255), TEXT_X, 7, TEXT_W, current_time % 8.0)
+
+    # Line 3 (y=13): Altitude + Speed (Green) - static
+    alt_spd_text = f"{alt_k} {spd_kt}kt"
+    _draw_scrolling_text(image, alt_spd_text, FONT_THUMB, (0, 220, 0), TEXT_X, 13, TEXT_W, current_time)
+
+    # Line 4 (y=19): Single cycling line - Aircraft code vs From/To airport name
     origin_name_raw = flight_data.get("origin_name", "") or AIRPORT_NAMES.get(origin, "")
     dest_name_raw = flight_data.get("dest_name", "") or AIRPORT_NAMES.get(dest, "")
     origin_name = _shorten_airport_name(origin_name_raw)
     dest_name = _shorten_airport_name(dest_name_raw)
-
     dest_nearby = dest in NEARBY_AIRPORTS
     origin_nearby = origin in NEARBY_AIRPORTS
 
@@ -757,33 +763,22 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     else:
         name_line = f"To: {dest_name}" if dest_name else ""
 
-    # Alternate: 8 sec route codes, 16 sec From/To name (long names need time to scroll fully)
-    route_cycle_period = 24.0  # 8 + 16
-    show_codes = (current_time % route_cycle_period) < 8.0
-    name_local_time = (current_time % route_cycle_period) - 8.0 if not show_codes else 0
-
-    if not show_codes and name_line:
-        _draw_scrolling_text(image, name_line, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, name_local_time)
-    else:
-        route_text = f"{origin} - {dest}"
-        _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, current_time % 8.0)
-
-    # Line 3 (y=22): Alternating Alt/Speed vs Aircraft (FONT_5X8)
-    cycle = int(current_time / 6.0) % 2
-    local_time_3 = current_time % 6.0
-    
+    cycle = int(current_time / 12.0) % 2
+    local_time_4 = current_time % 12.0
     if cycle == 0:
-        # Altitude and Speed (Green)
-        alt_spd_text = f"{alt_k} {spd_kt}kt"
-        _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, local_time_3)
-    else:
-        # Aircraft Code (Magenta)
+        # Aircraft code (Magenta) or alt/speed fallback
         if aircraft_code:
-            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 22, TEXT_W, local_time_3)
+            _draw_scrolling_text(image, aircraft_code, FONT_THUMB, (255, 0, 255), TEXT_X, 19, TEXT_W, local_time_4)
         else:
-            # Fallback to alt/spd if no aircraft code
-            alt_spd_text = f"{alt_k} {spd_kt}kt"
-            _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, local_time_3)
+            _draw_scrolling_text(image, alt_spd_text, FONT_THUMB, (0, 220, 0), TEXT_X, 19, TEXT_W, local_time_4)
+    else:
+        # From/To airport name (Cyan) or aircraft/alt fallback
+        if name_line:
+            _draw_scrolling_text(image, name_line, FONT_THUMB, (0, 220, 255), TEXT_X, 19, TEXT_W, local_time_4)
+        elif aircraft_code:
+            _draw_scrolling_text(image, aircraft_code, FONT_THUMB, (255, 0, 255), TEXT_X, 19, TEXT_W, local_time_4)
+        else:
+            _draw_scrolling_text(image, alt_spd_text, FONT_THUMB, (0, 220, 0), TEXT_X, 19, TEXT_W, local_time_4)
 
     # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]

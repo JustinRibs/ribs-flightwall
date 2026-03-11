@@ -3,18 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="description" content="Full Stack Ribs Inc. Ribs FlightWall Control Panel — Full Stack Ribs Inc.">
-    <title>Full Stack Ribs Inc. | Ribs FlightWall Control — Full Stack Ribs Inc.</title>
+    <meta name="description" content="Ribs FlightWall — Flight tracker control panel for LED matrix display">
+    <title>Ribs FlightWall | Control Panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <!-- Load Inter font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <header>
-            <p class="fsr-banner"><span class="fsr-banner-track"><span class="fsr-banner-inner">Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ </span><span class="fsr-banner-inner" aria-hidden="true">Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ Full Stack Ribs Inc. ✦ </span></span></p>
             <nav class="page-nav">
                 <a href="/" class="active">Control</a>
                 <a href="/stats">Stats</a>
@@ -24,14 +22,13 @@
                     <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.2-1.1.6L3 8l6 3.8L5.5 15 3.1 14.6l-1 1 3.4 3.4 3.4 3.4 1-1-.4-2.4L13 16.5l3.8 6c.4-.2.7-.6.6-1.1z"/>
                 </svg>
             </div>
-            <h1>Ribs FlightWall</h1>
-            <p class="fsr-tagline">Matrix LED Control Panel — A Full Stack Ribs Inc. Product</p>
-            <p class="fsr-legal">© Full Stack Ribs Inc. All Rights Reserved. Full Stack Ribs Inc.</p>
+            <h1>Ribs FlightWall <span class="flag" aria-hidden="true">🇭🇷</span></h1>
+            <p class="header-subtitle">Matrix LED display control</p>
         </header>
 
         <main>
             <div class="card">
-                <h2>Mode Selection <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <h2>Mode Selection</h2>
                 
                 <div class="mode-selector">
                     <button type="button" class="mode-btn active" data-mode="radius" id="btn-radius">Radius</button>
@@ -40,12 +37,12 @@
                 </div>
 
                 <p class="helper-text" id="mode-helper">
-                    <strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights. <em>Powered by Full Stack Ribs Inc.</em>
+                    <strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights.
                 </p>
             </div>
 
             <div class="card callsign-card" id="callsign-section" style="display: none;">
-                <h2>Target Callsign <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <h2>Target Callsign</h2>
                 <div class="input-group">
                     <input type="text" id="callsign-input" placeholder="e.g. DAL123" autocomplete="off" spellcheck="false">
                     <button id="update-btn" class="btn-primary">Track Flight</button>
@@ -56,7 +53,7 @@
             </div>
 
             <div class="card airport-card" id="airport-section" style="display: none;">
-                <h2>Target Airport <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <h2>Target Airport</h2>
                 <div class="input-group">
                     <input type="text" id="airport-input" placeholder="e.g. JFK or KJFK" autocomplete="off" spellcheck="false">
                     <button id="airport-btn" class="btn-primary">Show Arrivals</button>
@@ -69,7 +66,7 @@
             <div id="status-message" class="status-message"></div>
 
             <div class="card flight-card" id="flight-card" style="display:none;">
-                <h2>Now Tracking <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <h2>Now Tracking</h2>
                 <div class="flight-info">
                     <img id="fi-logo" class="fi-logo" src="" alt="" style="display:none;">
                     <div class="fi-text">
@@ -85,7 +82,7 @@
             </div>
 
             <div class="card arrivals-card" id="arrivals-card" style="display:none;">
-                <h2>Arrivals Board <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <h2>Arrivals Board</h2>
                 <p class="helper-text" id="arrivals-airport"></p>
                 <div id="arrivals-list" class="arrivals-list"></div>
                 <p class="helper-text" id="arrivals-none" style="display:none;">No arrivals loaded. Enter an airport code above.</p>
@@ -94,13 +91,13 @@
             {% if not matrix_available %}
             <div class="card matrix-card">
                 <div class="matrix-card-header">
-                    <h2>Matrix Preview <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                    <h2>Matrix Preview</h2>
                     <span class="matrix-badge">64×32</span>
                 </div>
                 <div class="matrix-preview-wrapper">
                     <div class="matrix-bezel">
                         <div class="matrix-screen">
-                            <img id="matrix-preview" src="{{ url_for('debug_matrix') }}" alt="Full Stack Ribs Inc. Matrix Output Preview" />
+                            <img id="matrix-preview" src="{{ url_for('debug_matrix') }}" alt="Matrix display preview" />
                         </div>
                     </div>
                 </div>
@@ -113,16 +110,15 @@
                     <button class="btn-test" data-preset="arrivals">Arrivals</button>
                 </div>
                 <p class="helper-text matrix-helper">
-                    Dev mode — hardware matrix not detected. Preview refreshes every 2s. Full Stack Ribs Inc.
+                    Dev mode — hardware matrix not detected. Preview refreshes every 2s.
                 </p>
             </div>
             {% endif %}
         </main>
 
-        <footer class="fsr-footer">
-            <p>Full Stack Ribs Inc.</p>
-            <p>Full Stack Ribs Inc. • Full Stack Ribs Inc. • Full Stack Ribs Inc.</p>
-            <p class="fsr-footer-tiny">Full Stack Ribs Inc. Full Stack Ribs Inc. Full Stack Ribs Inc. Full Stack Ribs Inc. Full Stack Ribs Inc.</p>
+        <footer class="page-footer">
+            <p>Ribs FlightWall</p>
+            <p><a href="/stats">View Stats</a></p>
         </footer>
     </div>
 

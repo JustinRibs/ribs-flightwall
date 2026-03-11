@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
@@ -25,8 +25,8 @@
                     <path d="M8 17v-3"/>
                 </svg>
             </div>
-            <h1>Your Airspace Stats</h1>
-            <p class="fsr-tagline">Last 7 days — Flights over your house</p>
+            <h1>Your Airspace Stats <span class="flag" aria-hidden="true">🇭🇷</span></h1>
+            <p class="header-subtitle">Last 7 days — Flights over your house</p>
         </header>
 
         <main>
@@ -73,7 +73,7 @@
             </div>
         </main>
 
-        <footer class="fsr-footer">
+        <footer class="page-footer">
             <p>Ribs FlightWall</p>
             <p><a href="/">Back to Control Panel</a></p>
         </footer>

@@ -75,7 +75,7 @@ def record_flight(flight_data: dict) -> bool:
         _last_recorded["callsign"] = callsign
         _last_recorded["time"] = now
 
-    seen_at = datetime.utcnow().isoformat() + "Z"
+    seen_at = datetime.now().isoformat()
     with _get_conn() as conn:
         conn.execute(
             """
@@ -108,7 +108,7 @@ def get_stats():
     - highest_flight: highest altitude flight of the week
     - busiest_hour: hour of day (0-23) with most flights over the week
     """
-    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     with _db_lock:
         with _get_conn() as conn:
             top = conn.execute("""

@@ -757,15 +757,16 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     else:
         name_line = f"To: {dest_name}" if dest_name else ""
 
-    # Alternate every 8 seconds: cycle 0 = route codes, cycle 1 = From/To name (when we have one)
-    route_cycle = int(current_time / 8.0) % 2
-    local_time = current_time % 8.0
+    # Alternate: 8 sec route codes, 16 sec From/To name (long names need time to scroll fully)
+    route_cycle_period = 24.0  # 8 + 16
+    show_codes = (current_time % route_cycle_period) < 8.0
+    name_local_time = (current_time % route_cycle_period) - 8.0 if not show_codes else 0
 
-    if route_cycle == 1 and name_line:
-        _draw_scrolling_text(image, name_line, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
+    if not show_codes and name_line:
+        _draw_scrolling_text(image, name_line, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, name_local_time)
     else:
         route_text = f"{origin} - {dest}"
-        _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
+        _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, current_time % 8.0)
 
     # Line 3 (y=22): Alternating Alt/Speed vs Aircraft (FONT_5X8)
     cycle = int(current_time / 6.0) % 2

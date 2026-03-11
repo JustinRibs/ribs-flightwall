@@ -77,6 +77,12 @@ body::before {
     color: var(--accent-hover);
 }
 
+.page-footer .footer-brand {
+    font-size: 11px;
+    opacity: 0.6;
+    margin-top: 12px;
+}
+
 /* Header */
 header {
     text-align: center;

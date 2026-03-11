@@ -216,6 +216,9 @@ AIRPORT_NAMES = {
     "SCL": "Santiago", "LIM": "Lima",      "EZE": "B Aires",
 }
 
+# Nearby airports (user knows these) — show the *other* airport's full name on matrix Line 2
+NEARBY_AIRPORTS = {"LGA", "JFK", "ISP", "EWR"}
+
 # In-memory cache for logo.dev raw bytes — shared by web route and matrix renderer
 # Keys: ICAO code (str). Values: bytes on success, None on failure.
 logodev_cache: dict = {}
@@ -735,16 +738,31 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     # Line 1 (y=2): Airline Name + Flight Number (FONT_5X8, Yellow)
     _draw_scrolling_text(image, display_callsign, FONT_5X8, (255, 220, 0), TEXT_X, 2, TEXT_W, current_time)
     
-    # Line 2 (y=12): Route (FONT_5X8, Cyan) or Full Destination Name
-    dest_name_raw = flight_data.get("dest_name", "")
+    # Line 2 (y=12): Route (FONT_5X8, Cyan) or full name of non-nearby airport
+    # Prefer showing the airport the user doesn't know (LGA, JFK, ISP, EWR are nearby)
+    origin_name_raw = flight_data.get("origin_name", "") or AIRPORT_NAMES.get(origin, "")
+    dest_name_raw = flight_data.get("dest_name", "") or AIRPORT_NAMES.get(dest, "")
+    origin_name = _shorten_airport_name(origin_name_raw)
     dest_name = _shorten_airport_name(dest_name_raw)
-    
-    # Alternate every 8 seconds
+
+    dest_nearby = dest in NEARBY_AIRPORTS
+    origin_nearby = origin in NEARBY_AIRPORTS
+
+    if dest_nearby and not origin_nearby and origin_name:
+        name_line = f"From: {origin_name}"
+    elif origin_nearby and not dest_nearby and dest_name:
+        name_line = f"To: {dest_name}"
+    elif (dest_nearby and origin_nearby) or (not origin_name and not dest_name):
+        name_line = ""
+    else:
+        name_line = f"To: {dest_name}" if dest_name else ""
+
+    # Alternate every 8 seconds: cycle 0 = route codes, cycle 1 = From/To name (when we have one)
     route_cycle = int(current_time / 8.0) % 2
     local_time = current_time % 8.0
-    
-    if route_cycle == 1 and dest_name:
-        _draw_scrolling_text(image, f"To: {dest_name}", FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
+
+    if route_cycle == 1 and name_line:
+        _draw_scrolling_text(image, name_line, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
     else:
         route_text = f"{origin} - {dest}"
         _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)

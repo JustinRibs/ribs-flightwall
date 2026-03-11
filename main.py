@@ -308,9 +308,8 @@ def init_matrix():
     options = RGBMatrixOptions()
     options.rows = 32
     options.cols = 64
-    options.hardware_mapping = 'adafruit-hat' 
-    options.panel_type = "FM6126A"
-    options.gpio_slowdown = 2 # CRITICAL for the Bonnet              # Required to prevent flickering on Pi Zero 2 W
+    options.hardware_mapping = 'adafruit-hat'  # CRITICAL for the Bonnet
+    options.gpio_slowdown = 4                  # Required to prevent flickering on Pi Zero 2 W
     options.drop_privileges = False            # Required to run Flask and GPIO simultaneously as root
     options.brightness = config.MATRIX_BRIGHTNESS
 

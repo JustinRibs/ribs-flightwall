@@ -6,6 +6,7 @@ import logging
 from io import BytesIO
 
 import requests
+import db
 from flask import Flask, render_template, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont, BdfFontFile
 import config
@@ -896,6 +897,10 @@ def led_daemon_loop():
                 app_state["current_arrivals"] = arrivals_data
                 if current_mode == "radius" and flight_data:
                     app_state["last_seen_flight"] = flight_data
+                    try:
+                        db.record_flight(flight_data)
+                    except Exception as e:
+                        logging.warning(f"Failed to record flight to DB: {e}")
                 render_flight = flight_data if flight_data else (
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
@@ -971,6 +976,21 @@ def airline_logo(icao):
     return send_file(BytesIO(logo_bytes), mimetype="image/png")
 
 
+@app.route('/stats')
+def stats_page():
+    return render_template('stats.html', matrix_available=MATRIX_AVAILABLE)
+
+
+@app.route('/api/stats')
+def api_stats():
+    """Return stats for the Stats page: top airlines, altitude extremes, busiest hour."""
+    try:
+        return jsonify(db.get_stats())
+    except Exception as e:
+        logging.error(f"Stats API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/debug/matrix.png')
 def debug_matrix():
     if not os.path.exists(DEBUG_IMAGE_PATH):
@@ -1041,6 +1061,7 @@ def debug_test_render():
     return jsonify({"status": "ok", "preset": preset, "flight": flight})
 
 if __name__ == '__main__':
+    db.init_db()
     # Start LED thread as a daemon (will die when main thread dies)
     led_thread = threading.Thread(target=led_daemon_loop, daemon=True)
     led_thread.start()

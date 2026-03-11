@@ -54,6 +54,21 @@ FONT_6X10   = load_bdf_font(os.path.join(FONTS_DIR, "6x10.bdf"))
 FONT_5X8    = load_bdf_font(os.path.join(FONTS_DIR, "5x8.bdf"))
 FONT_THUMB  = load_bdf_font(os.path.join(FONTS_DIR, "tom-thumb.bdf"))
 
+# Matrix brightness persistence file
+BRIGHTNESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".matrix_brightness")
+
+def _load_matrix_brightness() -> int:
+    """Load saved brightness from file, or fall back to config."""
+    try:
+        if os.path.exists(BRIGHTNESS_FILE):
+            with open(BRIGHTNESS_FILE, "r") as f:
+                val = int(f.read().strip())
+                return max(1, min(100, val))
+    except (ValueError, OSError):
+        pass
+    return config.MATRIX_BRIGHTNESS
+
+
 # Global Application State
 app_state = {
     "mode": "radius",       # "radius", "monitor", or "arrivals"
@@ -61,7 +76,8 @@ app_state = {
     "airport": "",          # Target airport IATA/ICAO for arrivals mode (e.g. JFK, KJFK)
     "current_flight": None, # Cache the latest flight data
     "current_arrivals": [], # List of arrivals for arrivals mode
-    "last_seen_flight": None # Last flight seen in radius mode (shown when nothing in range)
+    "last_seen_flight": None, # Last flight seen in radius mode (shown when nothing in range)
+    "matrix_brightness": _load_matrix_brightness(),
 }
 state_lock = threading.Lock()
 
@@ -919,6 +935,15 @@ def led_daemon_loop():
             poll_start = time.monotonic()
             while time.monotonic() - poll_start < sleep_sec:
                 current_time = time.time()
+                # Apply brightness from app_state (runtime adjustable via Settings)
+                if matrix:
+                    with state_lock:
+                        b = app_state.get("matrix_brightness")
+                    if b is not None:
+                        try:
+                            matrix.brightness = max(1, min(100, int(b)))
+                        except (AttributeError, TypeError):
+                            pass
                 if current_mode == "arrivals":
                     _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
                 else:
@@ -1023,6 +1048,45 @@ def _schedule_restart():
 @app.route('/settings')
 def settings_page():
     return render_template('settings.html', matrix_available=MATRIX_AVAILABLE)
+
+
+@app.route('/api/matrix-brightness', methods=['GET'])
+def api_matrix_brightness_get():
+    with state_lock:
+        return jsonify({"brightness": app_state["matrix_brightness"]})
+
+
+@app.route('/api/matrix-brightness', methods=['POST'])
+def api_matrix_brightness_post():
+    data = request.json or {}
+    with state_lock:
+        current = app_state["matrix_brightness"]
+
+    # Support delta (e.g. { "delta": -5 }) or absolute { "brightness": 50 }
+    if "delta" in data:
+        try:
+            delta = int(data["delta"])
+            val = max(1, min(100, current + delta))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid delta"}), 400
+    elif "brightness" in data:
+        try:
+            val = max(1, min(100, int(data["brightness"])))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid brightness"}), 400
+    else:
+        return jsonify({"error": "Provide delta or brightness"}), 400
+
+    with state_lock:
+        app_state["matrix_brightness"] = val
+
+    try:
+        with open(BRIGHTNESS_FILE, "w") as f:
+            f.write(str(val))
+    except OSError as e:
+        logging.warning(f"Could not persist matrix brightness: {e}")
+
+    return jsonify({"brightness": val})
 
 
 @app.route('/api/update-and-restart', methods=['POST'])

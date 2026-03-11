@@ -30,6 +30,20 @@
         </header>
 
         <main>
+            {% if matrix_available %}
+            <div class="card">
+                <h2>Matrix Brightness</h2>
+                <p class="helper-text">
+                    Adjust the LED matrix brightness (1–100). Changes apply immediately.
+                </p>
+                <div class="brightness-control">
+                    <button type="button" id="brightness-lower" class="btn-brightness" aria-label="Lower brightness">−</button>
+                    <span id="brightness-value" class="brightness-value">—</span>
+                    <button type="button" id="brightness-higher" class="btn-brightness" aria-label="Higher brightness">+</button>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="card">
                 <h2>Update & Restart</h2>
                 <p class="helper-text">
@@ -51,6 +65,36 @@
     </div>
 
     <script>
+        // Matrix brightness (only when matrix is available)
+        {% if matrix_available %}
+        (function () {
+            const lowerBtn = document.getElementById('brightness-lower');
+            const higherBtn = document.getElementById('brightness-higher');
+            const valueEl = document.getElementById('brightness-value');
+
+            function updateBrightness(delta) {
+                fetch('/api/matrix-brightness', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ delta: delta })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.brightness != null) valueEl.textContent = data.brightness;
+                })
+                .catch(() => {});
+            }
+
+            fetch('/api/matrix-brightness')
+                .then(r => r.json())
+                .then(data => { valueEl.textContent = data.brightness; })
+                .catch(() => { valueEl.textContent = '—'; });
+
+            if (lowerBtn) lowerBtn.addEventListener('click', () => updateBrightness(-5));
+            if (higherBtn) higherBtn.addEventListener('click', () => updateBrightness(5));
+        })();
+        {% endif %}
+
         document.getElementById('update-restart-btn').addEventListener('click', async function () {
             const btn = this;
             const resultEl = document.getElementById('update-result');

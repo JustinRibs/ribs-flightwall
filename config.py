@@ -36,4 +36,4 @@ MATRIX_BRIGHTNESS = int(os.getenv("MATRIX_BRIGHTNESS", "60"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))  # Seconds between monitor-mode polls
 FR24_POLL_INTERVAL = int(os.getenv("FR24_POLL_INTERVAL", "10"))  # CRITICAL: 10s for FlightRadar24 to avoid IP-block
 MONITOR_POLL_INTERVAL = int(os.getenv("MONITOR_POLL_INTERVAL", "60"))  # FlightAware (avoid high costs)
-FLASK_PORT = int(os.getenv("FLASK_PORT", "5001")) # Use 5001 locally, override to 80 on Pi in .env
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5003")) # Use 5001 locally, override to 80 on Pi in .env

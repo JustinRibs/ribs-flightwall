@@ -211,14 +211,49 @@ def _shorten_aircraft(model: str) -> str:
     return model
 
 
-def _fit_text(draw, text: str, font, max_px: int) -> str:
-    """Truncate text until it fits within max_px wide (measured by PIL, not char count)."""
-    while text:
-        w = draw.textlength(text, font=font)
-        if w <= max_px:
-            return text
-        text = text[:-1]
-    return ""
+def _draw_scrolling_text(image: Image.Image, text: str, font, fill: tuple, x: int, y: int, max_w: int, current_time: float):
+    """Draw text that smoothly scrolls horizontally if it exceeds max_w."""
+    if not text:
+        return
+        
+    # Measure full width
+    temp_img = Image.new("RGB", (1, 1))
+    temp_draw = ImageDraw.Draw(temp_img)
+    text_w = temp_draw.textlength(text, font=font)
+    
+    if text_w <= max_w:
+        # Fits perfectly, draw directly
+        draw = ImageDraw.Draw(image)
+        draw.text((x, y), text, font=font, fill=fill)
+        return
+        
+    # Text is too long, we need to scroll
+    overflow = text_w - max_w
+    
+    # Scrolling config
+    scroll_speed = 15.0  # pixels per second
+    pause_time = 1.5     # seconds to pause at ends
+    
+    scroll_duration = overflow / scroll_speed
+    cycle_time = pause_time + scroll_duration + pause_time
+    
+    # Calculate current position in the cycle
+    cycle_pos = current_time % cycle_time
+    
+    if cycle_pos < pause_time:
+        offset_x = 0
+    elif cycle_pos < pause_time + scroll_duration:
+        offset_x = -((cycle_pos - pause_time) * scroll_speed)
+    else:
+        offset_x = -overflow
+        
+    # Draw onto a temporary clipping canvas
+    clip_canvas = Image.new("RGBA", (max_w, 16), (0, 0, 0, 0))
+    clip_draw = ImageDraw.Draw(clip_canvas)
+    clip_draw.text((int(offset_x), 0), text, font=font, fill=(fill[0], fill[1], fill[2], 255))
+    
+    # Paste the clipped text onto the main image
+    image.paste(clip_canvas, (x, y), clip_canvas)
 
 
 def _get_logo_dev_url(icao_code: str) -> str | None:
@@ -515,17 +550,22 @@ def _square_crop(img: Image.Image) -> Image.Image:
     return img.crop((left, top, left + s, top + s))
 
 
-def _build_flight_image(flight_data) -> Image.Image:
-    """Pixel-perfect 64x32 layout: logo left (0-16) | separator at x=17 | text right (x=19+)."""
+def _build_flight_image(flight_data, current_time: float) -> Image.Image:
+    """Pixel-perfect 64x32 layout: logo left (0-16) | text right (x=19+)."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
-    font = FONT_5X8
-
-    # Vertical separator
-    draw.line([(17, 0), (17, 31)], fill=(40, 40, 40))
 
     if not flight_data:
-        draw.text((2, 12), "SCANNING...", font=FONT_THUMB, fill=(100, 100, 100))
+        time_str = time.strftime("%I:%M %p").lstrip("0")
+        
+        temp_img = Image.new("RGB", (1, 1))
+        temp_draw = ImageDraw.Draw(temp_img)
+        w = temp_draw.textlength(time_str, font=FONT_6X10)
+        
+        x = max(0, (64 - int(w)) // 2)
+        y = (32 - 10) // 2  # Approximate vertical center for 6x10 font
+        
+        draw.text((x, y), time_str, font=FONT_6X10, fill=(100, 100, 100))
         return image
 
     callsign      = (flight_data.get("callsign") or "").strip().upper()
@@ -537,15 +577,31 @@ def _build_flight_image(flight_data) -> Image.Image:
     spd_kt        = int(round(spd))
     aircraft_code = (flight_data.get("aircraft_code") or "").strip().upper()
 
-    # --- Right zone text: 4 rows at y=1,9,17,24 (FONT_5X8 is 8px tall) ---
+    # --- Right zone text: 3 lines ---
     TEXT_X = 19
     TEXT_W = 64 - TEXT_X  # 45px
 
-    draw.text((TEXT_X, 1),  _fit_text(draw, callsign,              font, TEXT_W), font=font, fill=(255, 220,   0))
-    draw.text((TEXT_X, 9),  _fit_text(draw, f"{origin}-{dest}",    font, TEXT_W), font=font, fill=(  0, 220, 255))
-    draw.text((TEXT_X, 17), _fit_text(draw, f"{alt_k} {spd_kt}kt", font, TEXT_W), font=font, fill=(  0, 220,   0))
-    if aircraft_code:
-        draw.text((TEXT_X, 24), _fit_text(draw, aircraft_code, font, TEXT_W), font=font, fill=(255, 140, 0))
+    # Line 1 (y=1): Callsign (FONT_6X10, Yellow)
+    _draw_scrolling_text(image, callsign, FONT_6X10, (255, 220, 0), TEXT_X, 1, TEXT_W, current_time)
+    
+    # Line 2 (y=12): Route (FONT_5X8, Cyan)
+    route_text = f"{origin} - {dest}"
+    _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, current_time)
+
+    # Line 3 (y=22): Alternating Alt/Speed vs Aircraft (FONT_5X8)
+    cycle = int(current_time / 5.0) % 2
+    if cycle == 0:
+        # Altitude and Speed (Green)
+        alt_spd_text = f"{alt_k} {spd_kt}kt"
+        _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, current_time)
+    else:
+        # Aircraft Code (Magenta)
+        if aircraft_code:
+            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 22, TEXT_W, current_time)
+        else:
+            # Fallback to alt/spd if no aircraft code
+            alt_spd_text = f"{alt_k} {spd_kt}kt"
+            _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, current_time)
 
     # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
@@ -597,9 +653,9 @@ def _display_image(matrix, image: Image.Image):
         image.save(DEBUG_IMAGE_PATH)
 
 
-def render_to_matrix(matrix, flight_data):
+def render_to_matrix(matrix, flight_data, current_time: float = 0.0):
     """Backward-compatible wrapper: build and display the flight image."""
-    _display_image(matrix, _build_flight_image(flight_data))
+    _display_image(matrix, _build_flight_image(flight_data, current_time))
 
 
 def led_daemon_loop():
@@ -628,18 +684,14 @@ def led_daemon_loop():
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
 
-            # 2. Display initial frame, then hold for poll interval, rebuilding on page flip
+            # 2. Display initial frame, then hold for poll interval, rebuilding on frame tick
             sleep_sec = config.FR24_POLL_INTERVAL if current_mode == "radius" else config.MONITOR_POLL_INTERVAL
             poll_start = time.monotonic()
-            last_page = int(time.time() / 5) % 2
-            _display_image(matrix, _build_flight_image(render_flight))
-
+            
             while time.monotonic() - poll_start < sleep_sec:
-                current_page = int(time.time() / 5) % 2
-                if current_page != last_page:
-                    _display_image(matrix, _build_flight_image(render_flight))
-                    last_page = current_page
-                time.sleep(0.1)
+                current_time = time.time()
+                _display_image(matrix, _build_flight_image(render_flight, current_time))
+                time.sleep(0.05)  # ~20 FPS for smooth scrolling
 
         except Exception as e:
             logging.error(f"Exception in LED daemon loop: {e}")
@@ -734,7 +786,11 @@ def debug_test_render():
     data = request.json or {}
     preset = data.get("preset", "with_logo")
     flight = TEST_FLIGHTS.get(preset, TEST_FLIGHTS["with_logo"])
-    render_to_matrix(None, flight)
+    # Pass a simulated current_time to see one of the animation states.
+    # In practice this endpoint renders a static image. You can test scrolling 
+    # states by modifying the current_time passed.
+    simulated_time = time.time()
+    render_to_matrix(None, flight, simulated_time)
     return jsonify({"status": "ok", "preset": preset, "flight": flight})
 
 if __name__ == '__main__':

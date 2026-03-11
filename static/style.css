@@ -192,80 +192,48 @@ h2 {
     line-height: 1.6;
 }
 
-/* Toggle Switch */
-.toggle-container {
+/* Mode Selector (3-way) */
+.mode-selector {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: center;
-    gap: 16px;
+    gap: 0;
     margin: 24px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg-color);
 }
 
-.toggle-label {
+.mode-btn {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 15px;
     font-weight: 500;
-    font-size: 16px;
+    font-family: inherit;
+    border: none;
+    background: transparent;
     color: var(--text-secondary);
-    transition: color 0.3s;
-}
-
-.toggle-label.active {
-    color: var(--text-primary);
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 64px;
-    height: 32px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--border);
-    transition: .4s;
+    transition: background 0.2s, color 0.2s;
 }
 
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 24px;
-    width: 24px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: .4s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+.mode-btn:hover {
+    color: var(--text-primary);
+    background: rgba(59, 130, 246, 0.08);
 }
 
-input:checked + .slider {
-    background-color: var(--accent);
+.mode-btn.active {
+    background: var(--accent);
+    color: white;
 }
 
-input:focus + .slider {
-    box-shadow: 0 0 1px var(--accent);
+.mode-btn + .mode-btn {
+    border-left: 1px solid var(--border);
 }
 
-input:checked + .slider:before {
-    transform: translateX(32px);
-}
-
-.slider.round {
-    border-radius: 34px;
-}
-
-.slider.round:before {
-    border-radius: 50%;
+.mode-btn.active + .mode-btn {
+    border-left-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Input Group */
@@ -516,6 +484,46 @@ input[type="text"]::placeholder {
 
 .fi-stat strong {
     color: var(--text-primary);
+}
+
+/* Arrivals Board Card */
+.arrivals-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.arrivals-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-color);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.arrivals-row .arr-callsign {
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 80px;
+}
+
+.arrivals-row .arr-route {
+    color: #7dd3fc;
+    flex: 1;
+    text-align: center;
+}
+
+.arrivals-row .arr-eta {
+    font-weight: 500;
+    color: var(--success);
+    min-width: 70px;
+    text-align: right;
 }
 
 /* Mobile Adjustments */

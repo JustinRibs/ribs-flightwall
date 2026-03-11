@@ -54,9 +54,11 @@ FONT_THUMB  = load_bdf_font(os.path.join(FONTS_DIR, "tom-thumb.bdf"))
 
 # Global Application State
 app_state = {
-    "mode": "radius",       # "radius" or "monitor"
+    "mode": "radius",       # "radius", "monitor", or "arrivals"
     "callsign": "",         # Target callsign for monitor mode
+    "airport": "",          # Target airport IATA/ICAO for arrivals mode (e.g. JFK, KJFK)
     "current_flight": None, # Cache the latest flight data
+    "current_arrivals": [], # List of arrivals for arrivals mode
     "last_seen_flight": None # Last flight seen in radius mode (shown when nothing in range)
 }
 state_lock = threading.Lock()
@@ -309,7 +311,8 @@ def init_matrix():
     options.rows = 32
     options.cols = 64
     options.hardware_mapping = 'adafruit-hat'  # CRITICAL for the Bonnet
-    options.gpio_slowdown = 4                  # Required to prevent flickering on Pi Zero 2 W
+    options.gpio_slowdown = 2                  # Required to prevent flickering on Pi Zero 2 W
+    options.panel_type = 'FM6126A'
     options.drop_privileges = False            # Required to run Flask and GPIO simultaneously as root
     options.brightness = config.MATRIX_BRIGHTNESS
 
@@ -319,6 +322,13 @@ def init_matrix():
 aeroapi_cache = {
     "callsign": "",
     "data": None,
+    "time": 0
+}
+
+# Cache for arrivals board (airport -> list of flight dicts)
+arrivals_cache = {
+    "airport": "",
+    "data": [],
     "time": 0
 }
 
@@ -425,6 +435,90 @@ def fetch_aeroapi_data(callsign):
     except requests.exceptions.RequestException as e:
         logging.error(f"AeroAPI Request Error: {e}")
         return None
+
+
+def fetch_arrivals_data(airport_code: str):
+    """
+    Fetch scheduled arrivals for an airport via AeroAPI /airports/{id}/flights/scheduled_arrivals.
+    Returns a list of flight dicts with callsign, origin, eta, airline_icao, aircraft_type.
+    """
+    global arrivals_cache
+
+    airport = (airport_code or "").strip().upper()
+    if not airport:
+        return []
+
+    now = time.time()
+    if airport == arrivals_cache["airport"] and now - arrivals_cache["time"] < config.ARRIVALS_POLL_INTERVAL:
+        return arrivals_cache["data"]
+
+    if not config.FLIGHTAWARE_API_KEY:
+        logging.error("No FlightAware API key configured for arrivals")
+        return []
+
+    headers = {"x-apikey": config.FLIGHTAWARE_API_KEY}
+    url = f"{AEROAPI_URL}/airports/{airport}/flights/scheduled_arrivals"
+
+    try:
+        resp = requests.get(
+            url,
+            headers=headers,
+            params={"type": "Airline", "max_pages": 1},
+            timeout=15
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        raw_arrivals = data.get("scheduled_arrivals", [])
+
+        # Take next ~10 arrivals, normalize to our format
+        result = []
+        for f in raw_arrivals[:10]:
+            ident = (f.get("ident") or "").strip().upper()
+            operator_icao = (f.get("operator_icao") or f.get("operator") or ident[:3] or "").strip().upper()[:3]
+
+            origin = f.get("origin") or {}
+            dest = f.get("destination") or {}
+            orig_iata = (origin.get("code_iata") or origin.get("code_icao") or "").strip().upper()
+            if len(orig_iata) > 3:
+                orig_iata = orig_iata[:3]
+            dest_iata = (dest.get("code_iata") or dest.get("code_icao") or "").strip().upper()
+            if len(dest_iata) > 3:
+                dest_iata = dest_iata[:3]
+
+            eta_str = f.get("estimated_on") or f.get("scheduled_on") or ""
+            eta_display = ""
+            if eta_str:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(eta_str.replace("Z", "+00:00"))
+                    # Format as "2:45 PM" (strip leading zero from hour)
+                    h = dt.hour % 12 or 12
+                    m = dt.minute
+                    eta_display = f"{h}:{m:02d} {'AM' if dt.hour < 12 else 'PM'}"
+                except Exception:
+                    eta_display = eta_str[:16] if len(eta_str) > 16 else eta_str
+
+            aircraft = (f.get("aircraft_type") or "").strip().upper()
+
+            result.append({
+                "callsign": ident,
+                "origin_iata": orig_iata or "???",
+                "dest_iata": dest_iata or airport[:3],
+                "airline_icao": operator_icao,
+                "airline_name": AIRLINE_NAMES.get(operator_icao, ""),
+                "aircraft_code": aircraft,
+                "eta": eta_display,
+                "route": f"{orig_iata} - {dest_iata}" if orig_iata and dest_iata else f"From {orig_iata}",
+            })
+
+        arrivals_cache = {"airport": airport, "data": result, "time": now}
+        logging.info(f"Arrivals: loaded {len(result)} for {airport}")
+        return result
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"AeroAPI Arrivals Error: {e}")
+        return arrivals_cache["data"] if arrivals_cache["airport"] == airport else []
+
 
 def _is_valid_commercial(flight):
     """Check if flight has both origin and destination IATA (filters out FRG/local traffic)."""
@@ -693,6 +787,69 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     return image
 
 
+def _build_arrivals_image(arrivals: list, airport_code: str, current_time: float) -> Image.Image:
+    """
+    Build a retro arrivals-board style 64x32 image.
+    Cycles through arrivals, showing one flight at a time. Header: "{AIRPORT} ARRIVALS"
+    """
+    image = Image.new("RGB", (64, 32), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    airport = (airport_code or "").strip().upper()[:3]
+    if not airport:
+        # Fallback: clock
+        time_str = time.strftime("%I:%M %p").lstrip("0")
+        draw.text((16, 10), time_str, font=FONT_6X10, fill=(100, 100, 100))
+        return image
+
+    if not arrivals:
+        header = f"{airport} ARR"
+        _draw_scrolling_text(image, header, FONT_6X10, (255, 220, 0), 0, 2, 64, current_time)
+        draw.text((4, 14), "No arrivals", font=FONT_5X8, fill=(100, 100, 100))
+        return image
+
+    # Cycle through flights every 6 seconds
+    cycle_sec = 6.0
+    idx = int(current_time / cycle_sec) % len(arrivals)
+    flight = arrivals[idx]
+
+    callsign = (flight.get("callsign") or "").strip().upper()
+    origin = (flight.get("origin_iata") or "???").strip().upper()
+    eta = (flight.get("eta") or "").strip()
+    airline_icao = (flight.get("airline_icao") or "").strip().upper()[:3]
+
+    # Line 0: Header "{AIRPORT} ARRIVALS" (scrolling if needed)
+    header = f"{airport} ARRIVALS"
+    _draw_scrolling_text(image, header, FONT_5X8, (255, 220, 0), 0, 1, 64, current_time)
+
+    # Line 1: Flight + origin (e.g. "AAL1695  PHL")
+    row1 = f"{callsign}  {origin}"
+    _draw_scrolling_text(image, row1, FONT_5X8, (0, 220, 255), 0, 11, 64, current_time)
+
+    # Line 2: ETA (e.g. "ETA 2:45 PM")
+    row2 = f"ETA {eta}" if eta else ""
+    _draw_scrolling_text(image, row2, FONT_5X8, (0, 220, 0), 0, 21, 64, current_time)
+
+    # Optional: small airline logo on the left (8x8 area) if we have space
+    if airline_icao:
+        logo_bytes = _fetch_logo_dev_bytes(airline_icao)
+        if logo_bytes:
+            try:
+                logo_img = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+                lw, lh = logo_img.size
+                scale = min(8.0 / lw, 8.0 / lh, 1.0)
+                nw, nh = max(1, int(lw * scale)), max(1, int(lh * scale))
+                logo_img = logo_img.resize((nw, nh), Image.Resampling.NEAREST)
+                centered = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+                px, py = (8 - nw) // 2, (8 - nh) // 2
+                centered.paste(logo_img, (px, py), logo_img)
+                image.paste(centered, (56, 12), centered)
+            except Exception:
+                pass
+
+    return image
+
+
 DEBUG_IMAGE_PATH = os.path.join(tempfile.gettempdir(), "ribs-flight-monitor_debug_matrix.png")
 
 
@@ -718,30 +875,48 @@ def led_daemon_loop():
             with state_lock:
                 current_mode = app_state["mode"]
                 target_callsign = app_state["callsign"].strip().upper()
+                target_airport = app_state["airport"].strip().upper()
 
             # 1. Fetch Data
             if current_mode == "radius":
                 flight_data = fetch_fr24_data()
+                arrivals_data = []
             elif current_mode == "monitor" and target_callsign:
                 flight_data = fetch_aeroapi_data(target_callsign)
+                arrivals_data = []
+            elif current_mode == "arrivals" and target_airport:
+                arrivals_data = fetch_arrivals_data(target_airport)
+                flight_data = None
             else:
                 flight_data = None
+                arrivals_data = []
 
             with state_lock:
                 app_state["current_flight"] = flight_data
+                app_state["current_arrivals"] = arrivals_data
                 if current_mode == "radius" and flight_data:
                     app_state["last_seen_flight"] = flight_data
                 render_flight = flight_data if flight_data else (
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
+                render_arrivals = arrivals_data
+                render_airport = target_airport
 
             # 2. Display initial frame, then hold for poll interval, rebuilding on frame tick
-            sleep_sec = config.FR24_POLL_INTERVAL if current_mode == "radius" else config.MONITOR_POLL_INTERVAL
+            if current_mode == "radius":
+                sleep_sec = config.FR24_POLL_INTERVAL
+            elif current_mode == "monitor":
+                sleep_sec = config.MONITOR_POLL_INTERVAL
+            else:
+                sleep_sec = config.ARRIVALS_POLL_INTERVAL
+
             poll_start = time.monotonic()
-            
             while time.monotonic() - poll_start < sleep_sec:
                 current_time = time.time()
-                _display_image(matrix, _build_flight_image(render_flight, current_time))
+                if current_mode == "arrivals":
+                    _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
+                else:
+                    _display_image(matrix, _build_flight_image(render_flight, current_time))
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
 
         except Exception as e:
@@ -760,7 +935,9 @@ def get_state():
         return jsonify({
             "mode": app_state["mode"],
             "callsign": app_state["callsign"],
-            "current_flight": app_state["current_flight"]
+            "airport": app_state["airport"],
+            "current_flight": app_state["current_flight"],
+            "current_arrivals": app_state["current_arrivals"]
         })
 
 @app.route('/api/state', methods=['POST'])
@@ -770,13 +947,17 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
             
         if "callsign" in data:
             app_state["callsign"] = str(data["callsign"]).upper()
             logging.info(f"Target callsign updated to {app_state['callsign']}")
+            
+        if "airport" in data:
+            app_state["airport"] = str(data["airport"]).upper().strip()
+            logging.info(f"Target airport updated to {app_state['airport']}")
             
     return jsonify({"status": "success"})
 
@@ -837,16 +1018,25 @@ TEST_FLIGHTS = {
     "no_flight": None,
 }
 
+# Sample arrivals for debug/test (arrivals board layout)
+TEST_ARRIVALS = [
+    {"callsign": "AAL1695", "origin_iata": "PHL", "eta": "2:45 PM", "airline_icao": "AAL"},
+    {"callsign": "UAL456", "origin_iata": "ORD", "eta": "3:12 PM", "airline_icao": "UAL"},
+    {"callsign": "DAL789", "origin_iata": "ATL", "eta": "3:30 PM", "airline_icao": "DAL"},
+]
+
 @app.route('/debug/test-render', methods=['POST'])
 def debug_test_render():
-    """Render a test flight to debug_matrix.png without calling any external API."""
+    """Render a test flight or arrivals board to debug_matrix.png without calling any external API."""
     data = request.json or {}
     preset = data.get("preset", "with_logo")
-    flight = TEST_FLIGHTS.get(preset, TEST_FLIGHTS["with_logo"])
-    # Pass a simulated current_time to see one of the animation states.
-    # In practice this endpoint renders a static image. You can test scrolling 
-    # states by modifying the current_time passed.
     simulated_time = time.time()
+
+    if preset == "arrivals":
+        _display_image(None, _build_arrivals_image(TEST_ARRIVALS, "JFK", simulated_time))
+        return jsonify({"status": "ok", "preset": preset, "arrivals": TEST_ARRIVALS})
+
+    flight = TEST_FLIGHTS.get(preset, TEST_FLIGHTS["with_logo"])
     render_to_matrix(None, flight, simulated_time)
     return jsonify({"status": "ok", "preset": preset, "flight": flight})
 

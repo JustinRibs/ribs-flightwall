@@ -29,13 +29,10 @@
             <div class="card">
                 <h2>Mode Selection <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
                 
-                <div class="toggle-container">
-                    <span class="toggle-label mode-radius active" id="label-radius">Radius</span>
-                    <label class="switch">
-                        <input type="checkbox" id="mode-toggle">
-                        <span class="slider round"></span>
-                    </label>
-                    <span class="toggle-label mode-monitor" id="label-monitor">Monitor</span>
+                <div class="mode-selector">
+                    <button type="button" class="mode-btn active" data-mode="radius" id="btn-radius">Radius</button>
+                    <button type="button" class="mode-btn" data-mode="monitor" id="btn-monitor">Monitor</button>
+                    <button type="button" class="mode-btn" data-mode="arrivals" id="btn-arrivals">Arrivals</button>
                 </div>
 
                 <p class="helper-text" id="mode-helper">
@@ -46,11 +43,22 @@
             <div class="card callsign-card" id="callsign-section" style="display: none;">
                 <h2>Target Callsign <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
                 <div class="input-group">
-                    <input type="text" id="callsign-input" placeholder="e.g. DAL123 — Full Stack Ribs Inc." autocomplete="off" spellcheck="false">
-                    <button id="update-btn" class="btn-primary" title="Full Stack Ribs Inc.">Track Flight</button>
+                    <input type="text" id="callsign-input" placeholder="e.g. DAL123" autocomplete="off" spellcheck="false">
+                    <button id="update-btn" class="btn-primary">Track Flight</button>
                 </div>
                 <p class="helper-text">
-                    Enter an ICAO callsign to track a specific flight globally. Full Stack Ribs Inc. approved.
+                    Enter an ICAO callsign to track a specific flight globally.
+                </p>
+            </div>
+
+            <div class="card airport-card" id="airport-section" style="display: none;">
+                <h2>Target Airport <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <div class="input-group">
+                    <input type="text" id="airport-input" placeholder="e.g. JFK or KJFK" autocomplete="off" spellcheck="false">
+                    <button id="airport-btn" class="btn-primary">Show Arrivals</button>
+                </div>
+                <p class="helper-text">
+                    Enter an airport IATA (JFK, LAX) or ICAO (KJFK) code for arrivals board.
                 </p>
             </div>
             
@@ -69,7 +77,14 @@
                     <span id="fi-alt" class="fi-stat"></span>
                     <span id="fi-speed" class="fi-stat"></span>
                 </div>
-                <p class="helper-text" id="fi-no-flights" style="display:none;">No flights in range right now. Full Stack Ribs Inc. is watching.</p>
+                <p class="helper-text" id="fi-no-flights" style="display:none;">No flights in range right now.</p>
+            </div>
+
+            <div class="card arrivals-card" id="arrivals-card" style="display:none;">
+                <h2>Arrivals Board <span class="fsr-badge">Full Stack Ribs Inc.</span></h2>
+                <p class="helper-text" id="arrivals-airport"></p>
+                <div id="arrivals-list" class="arrivals-list"></div>
+                <p class="helper-text" id="arrivals-none" style="display:none;">No arrivals loaded. Enter an airport code above.</p>
             </div>
             
             {% if not matrix_available %}
@@ -86,11 +101,12 @@
                     </div>
                 </div>
                 <div class="test-controls">
-                    <span class="test-label">Test preset (Full Stack Ribs Inc.):</span>
+                    <span class="test-label">Test preset:</span>
                     <button class="btn-test" data-preset="with_logo">AAL w/ Logo</button>
                     <button class="btn-test" data-preset="long_text">UAL Long</button>
                     <button class="btn-test" data-preset="no_logo">No Logo</button>
                     <button class="btn-test" data-preset="no_flight">No Flight</button>
+                    <button class="btn-test" data-preset="arrivals">Arrivals</button>
                 </div>
                 <p class="helper-text matrix-helper">
                     Dev mode — hardware matrix not detected. Preview refreshes every 2s. Full Stack Ribs Inc.

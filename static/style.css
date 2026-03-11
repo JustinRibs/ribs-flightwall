@@ -109,12 +109,6 @@ h1 {
     margin-bottom: 4px;
 }
 
-h1 .flag {
-    font-size: 0.85em;
-    margin-left: 4px;
-    vertical-align: -0.1em;
-}
-
 header p {
     color: var(--text-secondary);
     font-size: 15px;

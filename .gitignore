@@ -36,6 +36,7 @@ htmlcov/
 
 # Project-specific runtime/debug output
 debug_matrix.png
+.matrix_brightness
 flights.db
 .env
 .env

@@ -211,6 +211,16 @@ def _shorten_aircraft(model: str) -> str:
     return model
 
 
+def _shorten_airport_name(name: str) -> str:
+    """Shorten common words in airport names to fit better on matrix."""
+    if not name:
+        return ""
+    name = name.replace("International Airport", "Intl")
+    name = name.replace("International", "Intl")
+    name = name.replace("Airport", "")
+    return name.replace("  ", " ").strip()
+
+
 def _draw_scrolling_text(image: Image.Image, text: str, font, fill: tuple, x: int, y: int, max_w: int, current_time: float):
     """Draw text that smoothly scrolls horizontally if it exceeds max_w."""
     if not text:
@@ -380,6 +390,9 @@ def fetch_aeroapi_data(callsign):
             destination = pos_data.get("destination") or {}
             orig_iata = (origin.get("code_iata") or "").strip().upper() if isinstance(origin, dict) else ""
             dest_iata = (destination.get("code_iata") or "").strip().upper() if isinstance(destination, dict) else ""
+            orig_name = (origin.get("name") or "").strip() if isinstance(origin, dict) else ""
+            dest_name = (destination.get("name") or "").strip() if isinstance(destination, dict) else ""
+            
             if not orig_iata:
                 orig_iata = (origin.get("code_icao") or "").strip().upper()[:3] if isinstance(origin, dict) else ""
             if not dest_iata:
@@ -395,6 +408,8 @@ def fetch_aeroapi_data(callsign):
                 "route": f"{orig_iata} - {dest_iata}" if orig_iata and dest_iata else "",
                 "origin_iata": orig_iata,
                 "dest_iata": dest_iata,
+                "origin_name": orig_name,
+                "dest_name": dest_name,
                 "airline_icao": operator,
                 "airline_name": AIRLINE_NAMES.get(operator, ""),
             }
@@ -459,6 +474,8 @@ def fetch_fr24_data():
         route = f"{orig} - {dest}" if orig and dest else ""
 
         aircraft_model = None
+        orig_name = ""
+        dest_name = ""
         try:
             details = fr_api.get_flight_details(closest)
             if details and isinstance(details, dict):
@@ -466,6 +483,14 @@ def fetch_fr24_data():
                 aircraft_model = getattr(closest, "aircraft_model", None)
                 if aircraft_model in NA_VALUES:
                     aircraft_model = None
+                
+                # Extract airport names
+                airport_info = details.get("airport", {})
+                if airport_info:
+                    orig_info = airport_info.get("origin") or {}
+                    dest_info = airport_info.get("destination") or {}
+                    orig_name = (orig_info.get("name") or "").strip()
+                    dest_name = (dest_info.get("name") or "").strip()
         except Exception as e:
             logging.warning(f"get_flight_details timeout/incomplete for {closest.callsign}: {e}")
             # Continue with basic data - we have route from list response
@@ -488,6 +513,8 @@ def fetch_fr24_data():
             "route": route,
             "origin_iata": orig,
             "dest_iata": dest,
+            "origin_name": orig_name,
+            "dest_name": dest_name,
             "airline_icao": airline_icao,
             "airline_name": AIRLINE_NAMES.get(airline_icao, ""),
             "aircraft_model": aircraft_model or aircraft_code,  # full name for web UI
@@ -596,24 +623,36 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     # Line 1 (y=2): Airline Name + Flight Number (FONT_5X8, Yellow)
     _draw_scrolling_text(image, display_callsign, FONT_5X8, (255, 220, 0), TEXT_X, 2, TEXT_W, current_time)
     
-    # Line 2 (y=12): Route (FONT_5X8, Cyan)
-    route_text = f"{origin} - {dest}"
-    _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, current_time)
+    # Line 2 (y=12): Route (FONT_5X8, Cyan) or Full Destination Name
+    dest_name_raw = flight_data.get("dest_name", "")
+    dest_name = _shorten_airport_name(dest_name_raw)
+    
+    # Alternate every 8 seconds
+    route_cycle = int(current_time / 8.0) % 2
+    local_time = current_time % 8.0
+    
+    if route_cycle == 1 and dest_name:
+        _draw_scrolling_text(image, f"To: {dest_name}", FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
+    else:
+        route_text = f"{origin} - {dest}"
+        _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 12, TEXT_W, local_time)
 
     # Line 3 (y=22): Alternating Alt/Speed vs Aircraft (FONT_5X8)
-    cycle = int(current_time / 5.0) % 2
+    cycle = int(current_time / 6.0) % 2
+    local_time_3 = current_time % 6.0
+    
     if cycle == 0:
         # Altitude and Speed (Green)
         alt_spd_text = f"{alt_k} {spd_kt}kt"
-        _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, current_time)
+        _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, local_time_3)
     else:
         # Aircraft Code (Magenta)
         if aircraft_code:
-            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 22, TEXT_W, current_time)
+            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 22, TEXT_W, local_time_3)
         else:
             # Fallback to alt/spd if no aircraft code
             alt_spd_text = f"{alt_k} {spd_kt}kt"
-            _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, current_time)
+            _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 22, TEXT_W, local_time_3)
 
     # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
@@ -764,6 +803,8 @@ TEST_FLIGHTS = {
         "altitude": 27000,
         "speed": 503,
         "route": "PHL - BOS",
+        "origin_name": "Philadelphia International Airport",
+        "dest_name": "Boston Logan International Airport",
         "airline_icao": "AAL",
         "airline_name": "American",
         "aircraft_model": "Boeing 737 MAX 8",
@@ -774,6 +815,8 @@ TEST_FLIGHTS = {
         "altitude": 8500,
         "speed": 210,
         "route": "FRG - ACK",
+        "origin_name": "Republic Airport",
+        "dest_name": "Nantucket Memorial Airport",
         "airline_icao": "",
         "airline_name": "",
         "aircraft_model": "Cessna 172",
@@ -784,6 +827,8 @@ TEST_FLIGHTS = {
         "altitude": 35000,
         "speed": 480,
         "route": "PDX - LAX",
+        "origin_name": "Portland International Airport",
+        "dest_name": "Los Angeles International Airport",
         "airline_icao": "ASA",
         "airline_name": "Alaska",
         "aircraft_model": "Boeing 737 MAX 9",

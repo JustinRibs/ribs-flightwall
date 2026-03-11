@@ -6,8 +6,10 @@ Runs the flight tracker web dashboard on port 80 for network access.
 import threading
 
 from main import app, led_daemon_loop
+import db
 
 if __name__ == '__main__':
+    db.init_db()
     # Start LED matrix daemon thread
     led_thread = threading.Thread(target=led_daemon_loop, daemon=True)
     led_thread.start()

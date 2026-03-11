@@ -36,5 +36,6 @@ htmlcov/
 
 # Project-specific runtime/debug output
 debug_matrix.png
+flights.db
 .env
 .env

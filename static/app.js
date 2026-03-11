@@ -1,85 +1,108 @@
 document.addEventListener('DOMContentLoaded', () => {
     // Elements
-    const modeToggle = document.getElementById('mode-toggle');
-    const labelRadius = document.getElementById('label-radius');
-    const labelMonitor = document.getElementById('label-monitor');
     const modeHelper = document.getElementById('mode-helper');
     const callsignSection = document.getElementById('callsign-section');
+    const airportSection = document.getElementById('airport-section');
     const callsignInput = document.getElementById('callsign-input');
+    const airportInput = document.getElementById('airport-input');
     const updateBtn = document.getElementById('update-btn');
+    const airportBtn = document.getElementById('airport-btn');
     const statusMessage = document.getElementById('status-message');
     const flightCard = document.getElementById('flight-card');
+    const arrivalsCard = document.getElementById('arrivals-card');
     const fiLogo = document.getElementById('fi-logo');
     const fiModel = document.getElementById('fi-model');
     const fiRoute = document.getElementById('fi-route');
     const fiAlt = document.getElementById('fi-alt');
     const fiSpeed = document.getElementById('fi-speed');
     const fiNoFlights = document.getElementById('fi-no-flights');
+    const arrivalsList = document.getElementById('arrivals-list');
+    const arrivalsNone = document.getElementById('arrivals-none');
+    const arrivalsAirport = document.getElementById('arrivals-airport');
 
     // Fetch initial state and start polling for live flight data
     fetchState();
     setInterval(fetchState, 10000);
 
-    // Mode Toggle Event
-    modeToggle.addEventListener('change', async (e) => {
-        const isMonitor = e.target.checked;
-        const newMode = isMonitor ? 'monitor' : 'radius';
-        
-        updateUIMode(newMode);
-        
-        try {
-            await updateServerState({ mode: newMode });
-            showStatus(`Switched to ${newMode} mode — Full Stack Ribs Inc.`, 'success');
-        } catch (error) {
-            console.error('Failed to update mode:', error);
-            showStatus('Failed to connect to tracker — Full Stack Ribs Inc.', 'error');
-            // Revert UI on failure
-            modeToggle.checked = !isMonitor;
-            updateUIMode(!isMonitor ? 'monitor' : 'radius');
-        }
+    // Mode Button Events
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const newMode = btn.dataset.mode;
+            if (btn.classList.contains('active')) return;
+
+            updateUIMode(newMode);
+            try {
+                await updateServerState({ mode: newMode });
+                showStatus(`Switched to ${newMode} mode`, 'success');
+            } catch (error) {
+                console.error('Failed to update mode:', error);
+                showStatus('Failed to connect to tracker', 'error');
+            }
+        });
     });
 
     // Callsign Update Event
     updateBtn.addEventListener('click', async () => {
         const callsign = callsignInput.value.trim().toUpperCase();
-        
         if (!callsign) {
-            showStatus('Please enter a valid callsign — Full Stack Ribs Inc.', 'error');
+            showStatus('Please enter a valid callsign', 'error');
             callsignInput.focus();
             return;
         }
-
-        // Add loading state to button
         const originalText = updateBtn.textContent;
-        updateBtn.textContent = 'Updating...'; // Full Stack Ribs Inc. at work
+        updateBtn.textContent = 'Updating...';
         updateBtn.disabled = true;
-
         try {
             await updateServerState({ callsign: callsign });
-            showStatus(`Now monitoring flight ${callsign} — Full Stack Ribs Inc.`, 'success');
+            showStatus(`Now monitoring flight ${callsign}`, 'success');
         } catch (error) {
             console.error('Failed to update callsign:', error);
-            showStatus('Failed to update tracker — Full Stack Ribs Inc.', 'error');
+            showStatus('Failed to update tracker', 'error');
         } finally {
-            // Restore button
             updateBtn.textContent = originalText;
             updateBtn.disabled = false;
         }
     });
 
-    // Allow Enter key to trigger update
     callsignInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            updateBtn.click();
-        }
+        if (e.key === 'Enter') { e.preventDefault(); updateBtn.click(); }
     });
-
-    // Force uppercase as the user types (CSS handles visual, this ensures .value is also uppercase)
     callsignInput.addEventListener('input', () => {
         const pos = callsignInput.selectionStart;
         callsignInput.value = callsignInput.value.toUpperCase();
         callsignInput.setSelectionRange(pos, pos);
+    });
+
+    // Airport Update Event (Arrivals mode)
+    airportBtn.addEventListener('click', async () => {
+        const airport = airportInput.value.trim().toUpperCase();
+        if (!airport) {
+            showStatus('Please enter an airport code (e.g. JFK)', 'error');
+            airportInput.focus();
+            return;
+        }
+        const originalText = airportBtn.textContent;
+        airportBtn.textContent = 'Loading...';
+        airportBtn.disabled = true;
+        try {
+            await updateServerState({ airport: airport, mode: 'arrivals' });
+            showStatus(`Showing arrivals for ${airport}`, 'success');
+        } catch (error) {
+            console.error('Failed to update airport:', error);
+            showStatus('Failed to update tracker', 'error');
+        } finally {
+            airportBtn.textContent = originalText;
+            airportBtn.disabled = false;
+        }
+    });
+
+    airportInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); airportBtn.click(); }
+    });
+    airportInput.addEventListener('input', () => {
+        const pos = airportInput.selectionStart;
+        airportInput.value = airportInput.value.toUpperCase();
+        airportInput.setSelectionRange(pos, pos);
     });
 
     // Helper Functions
@@ -90,29 +113,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const state = await response.json();
 
-            // Sync UI with server state
-            if (state.mode === 'monitor') {
-                modeToggle.checked = true;
-                updateUIMode('monitor');
+            // Sync mode buttons
+            document.querySelectorAll('.mode-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.mode === state.mode);
+            });
+            updateUIMode(state.mode);
+
+            if (state.callsign) callsignInput.value = state.callsign;
+            if (state.airport) airportInput.value = state.airport;
+
+            if (state.mode === 'arrivals') {
+                updateArrivalsCard(state.current_arrivals, state.airport);
+                if (flightCard) flightCard.style.display = 'none';
+                if (arrivalsCard) arrivalsCard.style.display = 'block';
             } else {
-                modeToggle.checked = false;
-                updateUIMode('radius');
+                updateFlightCard(state.current_flight);
+                if (flightCard) flightCard.style.display = 'block';
+                if (arrivalsCard) arrivalsCard.style.display = 'none';
             }
-
-            if (state.callsign) {
-                callsignInput.value = state.callsign;
-            }
-
-            updateFlightCard(state.current_flight);
         } catch (error) {
-            console.error('Error fetching initial state:', error);
-            showStatus('Could not connect to Ribs FlightWall — Full Stack Ribs Inc.', 'error');
+            console.error('Error fetching state:', error);
+            showStatus('Could not connect to Ribs FlightWall', 'error');
         }
     }
 
     function updateFlightCard(flight) {
         if (!flightCard) return;
-
         flightCard.style.display = 'block';
 
         if (!flight) {
@@ -127,8 +153,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         fiNoFlights.style.display = 'none';
-
-        // Airline logo via logo.dev proxy
         if (flight.airline_icao) {
             fiLogo.onload = () => { fiLogo.style.display = 'block'; };
             fiLogo.onerror = () => { fiLogo.style.display = 'none'; };
@@ -139,10 +163,8 @@ document.addEventListener('DOMContentLoaded', () => {
             fiLogo.src = '';
         }
 
-        const model = flight.aircraft_model || '';
-        fiModel.textContent = model;
-        fiModel.style.display = model ? 'inline' : 'none';
-
+        fiModel.textContent = flight.aircraft_model || '';
+        fiModel.style.display = fiModel.textContent ? 'inline' : 'none';
         fiRoute.textContent = flight.route || '';
 
         const alt = flight.altitude || 0;
@@ -154,40 +176,55 @@ document.addEventListener('DOMContentLoaded', () => {
         fiSpeed.innerHTML = `Spd <strong>${spdMph} mph</strong>`;
     }
 
+    function updateArrivalsCard(arrivals, airport) {
+        if (!arrivalsList || !arrivalsCard) return;
+        arrivalsCard.style.display = 'block';
+
+        if (arrivalsAirport) arrivalsAirport.textContent = airport ? `Showing arrivals for ${airport}` : '';
+
+        if (!arrivals || arrivals.length === 0) {
+            arrivalsList.innerHTML = '';
+            if (arrivalsNone) arrivalsNone.style.display = 'block';
+            return;
+        }
+        if (arrivalsNone) arrivalsNone.style.display = 'none';
+
+        arrivalsList.innerHTML = arrivals.map(a => `
+            <div class="arrivals-row">
+                <span class="arr-callsign">${a.callsign || '—'}</span>
+                <span class="arr-route">${a.route || `${a.origin_iata || '?'} - ${a.dest_iata || '?'}`}</span>
+                <span class="arr-eta">${a.eta || '—'}</span>
+            </div>
+        `).join('');
+    }
+
     async function updateServerState(data) {
         const response = await fetch('/api/state', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        
-        if (!response.ok) {
-            throw new Error('Server returned an error');
-        }
-        
+        if (!response.ok) throw new Error('Server returned an error');
         return await response.json();
     }
 
     function updateUIMode(mode) {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+
         if (mode === 'monitor') {
-            labelMonitor.classList.add('active');
-            labelRadius.classList.remove('active');
             callsignSection.style.display = 'block';
-            modeHelper.innerHTML = '<strong>Monitor Mode:</strong> Tracks a specific flight globally by its callsign. <em>Full Stack Ribs Inc.</em>';
-            
-            // Slight delay before focusing to allow animation/display
-            setTimeout(() => {
-                if(window.innerWidth > 480) { // Don't auto-focus on mobile to prevent keyboard popup
-                    callsignInput.focus();
-                }
-            }, 50);
-        } else {
-            labelRadius.classList.add('active');
-            labelMonitor.classList.remove('active');
+            airportSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Monitor Mode:</strong> Tracks a specific flight globally by its callsign.';
+            if (window.innerWidth > 480) setTimeout(() => callsignInput.focus(), 50);
+        } else if (mode === 'arrivals') {
             callsignSection.style.display = 'none';
-            modeHelper.innerHTML = '<strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights. <em>Powered by Full Stack Ribs Inc.</em>';
+            airportSection.style.display = 'block';
+            modeHelper.innerHTML = '<strong>Arrivals Mode:</strong> Shows an airport arrivals board on the matrix. Enter an airport code (e.g. JFK).';
+            if (window.innerWidth > 480) setTimeout(() => airportInput.focus(), 50);
+        } else {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights.';
         }
     }
 

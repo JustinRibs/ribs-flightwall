@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Flight stats over your home — Most common airlines, altitude records, busiest hours.">
+    <title>Stats | Ribs FlightWall</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <nav class="page-nav">
+                <a href="/">Control</a>
+                <a href="/stats" class="active">Stats</a>
+            </nav>
+            <div class="header-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 3v18h18"/>
+                    <path d="M18 17V9"/>
+                    <path d="M13 17V5"/>
+                    <path d="M8 17v-3"/>
+                </svg>
+            </div>
+            <h1>Your Airspace Stats <span class="flag" aria-hidden="true">🇭🇷</span></h1>
+            <p class="header-subtitle">Last 7 days — Flights over your house</p>
+        </header>
+
+        <main>
+            <div id="stats-loading" class="card">
+                <p class="helper-text">Loading stats…</p>
+            </div>
+            <div id="stats-content" style="display: none;">
+                <div class="card stats-summary">
+                    <h2>This Week</h2>
+                    <p id="total-flights" class="stats-total"></p>
+                </div>
+
+                <div class="card">
+                    <h2>Most Common Airlines</h2>
+                    <p class="helper-text">Airlines seen most often in your airspace</p>
+                    <div id="top-airlines" class="airline-list"></div>
+                </div>
+
+                <div class="card">
+                    <h2>Altitude Records</h2>
+                    <div class="altitude-cards">
+                        <div id="lowest-card" class="alt-card lowest">
+                            <span class="alt-label">Lowest</span>
+                            <span id="lowest-alt" class="alt-value"></span>
+                            <span id="lowest-details" class="alt-details"></span>
+                        </div>
+                        <div id="highest-card" class="alt-card highest">
+                            <span class="alt-label">Highest</span>
+                            <span id="highest-alt" class="alt-value"></span>
+                            <span id="highest-details" class="alt-details"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Busiest Hour</h2>
+                    <p class="helper-text">Time of day with the most flights overhead</p>
+                    <div id="busiest-hour" class="busiest-hour"></div>
+                </div>
+            </div>
+            <div id="stats-empty" class="card" style="display: none;">
+                <h2>No Data Yet</h2>
+                <p class="helper-text">Run in <strong>Radius mode</strong> and leave it running for a while. Flights that pass over your home will be recorded automatically.</p>
+            </div>
+        </main>
+
+        <footer class="page-footer">
+            <p>Ribs FlightWall</p>
+            <p><a href="/">Back to Control Panel</a></p>
+            <p class="footer-brand">Ribs Full Stack inc. ™</p>
+        </footer>
+    </div>
+
+    <script>
+        (async function() {
+            try {
+                const resp = await fetch('/api/stats');
+                const data = await resp.json();
+                document.getElementById('stats-loading').style.display = 'none';
+
+                if (data.error) {
+                    document.getElementById('stats-empty').style.display = 'block';
+                    document.querySelector('#stats-empty .helper-text').textContent = data.error;
+                    return;
+                }
+
+                const total = data.total_flights_week || 0;
+                if (total === 0 && !data.top_airlines?.length) {
+                    document.getElementById('stats-empty').style.display = 'block';
+                    return;
+                }
+
+                document.getElementById('stats-content').style.display = 'block';
+
+                // Total flights
+                document.getElementById('total-flights').textContent =
+                    total === 1 ? '1 flight recorded' : `${total} flights recorded`;
+
+                // Top airlines
+                const list = document.getElementById('top-airlines');
+                const airlines = data.top_airlines || [];
+                if (airlines.length) {
+                    list.innerHTML = airlines.map((a, i) => `
+                        <div class="airline-row">
+                            <span class="airline-rank">${i + 1}</span>
+                            <span class="airline-name">${escapeHtml(a.airline_name || a.airline_icao)}</span>
+                            <span class="airline-count">${a.count}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<p class="helper-text">No airline data yet.</p>';
+                }
+
+                // Lowest flight
+                const low = data.lowest_flight;
+                if (low) {
+                    document.getElementById('lowest-alt').textContent = formatAlt(low.altitude);
+                    document.getElementById('lowest-details').textContent =
+                        `${low.callsign || ''} ${low.route || ''}`.trim() || '—';
+                } else {
+                    document.getElementById('lowest-card').innerHTML =
+                        '<span class="alt-label">Lowest</span><span class="helper-text">No data</span>';
+                }
+
+                // Highest flight
+                const high = data.highest_flight;
+                if (high) {
+                    document.getElementById('highest-alt').textContent = formatAlt(high.altitude);
+                    document.getElementById('highest-details').textContent =
+                        `${high.callsign || ''} ${high.route || ''}`.trim() || '—';
+                } else {
+                    document.getElementById('highest-card').innerHTML =
+                        '<span class="alt-label">Highest</span><span class="helper-text">No data</span>';
+                }
+
+                // Busiest hour
+                const hour = data.busiest_hour;
+                const count = data.busiest_count || 0;
+                if (hour != null) {
+                    const h12 = hour % 12 || 12;
+                    const ampm = hour < 12 ? 'AM' : 'PM';
+                    document.getElementById('busiest-hour').innerHTML = `
+                        <span class="busiest-time">${h12}:00 ${ampm}</span>
+                        <span class="busiest-count">${count} flight${count !== 1 ? 's' : ''}</span>
+                    `;
+                } else {
+                    document.getElementById('busiest-hour').innerHTML =
+                        '<span class="helper-text">No data</span>';
+                }
+            } catch (e) {
+                document.getElementById('stats-loading').style.display = 'none';
+                document.getElementById('stats-empty').style.display = 'block';
+                document.querySelector('#stats-empty .helper-text').textContent =
+                    'Could not load stats. Make sure the tracker is running.';
+            }
+        })();
+
+        function formatAlt(ft) {
+            if (ft == null) return '—';
+            return ft >= 1000 ? `${Math.round(ft / 1000)}k ft` : `${ft} ft`;
+        }
+        function escapeHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    </script>
+</body>
+</html>

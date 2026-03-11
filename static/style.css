@@ -1,14 +1,17 @@
 :root {
-    --bg-color: #0f172a;
-    --card-bg: #1e293b;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --success: #10b981;
-    --error: #ef4444;
-    --border: #334155;
-    --border-radius: 16px;
+    --bg-color: #f8fafc;
+    --card-bg: #ffffff;
+    --card-bg-hover: #f8fafc;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-muted: rgba(37, 99, 235, 0.08);
+    --success: #059669;
+    --error: #dc2626;
+    --border: #e2e8f0;
+    --border-radius: 12px;
+    --shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
 * {
@@ -18,10 +21,10 @@
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background-color: var(--bg-color);
     color: var(--text-primary);
-    line-height: 1.5;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     position: relative;
 }
@@ -29,32 +32,8 @@ body {
 body::before {
     content: "";
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: repeating-linear-gradient(
-        -45deg,
-        transparent,
-        transparent 80px,
-        rgba(59, 130, 246, 0.02) 80px,
-        rgba(59, 130, 246, 0.02) 81px
-    );
-    pointer-events: none;
-    z-index: 0;
-}
-
-body::after {
-    content: "Full Stack Ribs Inc.";
-    position: fixed;
-    font-size: 9px;
-    color: var(--text-secondary);
-    opacity: 0.06;
-    letter-spacing: 0.3em;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-30deg);
-    white-space: nowrap;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(37, 99, 235, 0.08) 0%, transparent 50%);
     pointer-events: none;
     z-index: 0;
 }
@@ -67,100 +46,73 @@ body::after {
     z-index: 1;
 }
 
-/* Full Stack Ribs Inc. Branding */
-.fsr-banner {
-    font-size: 11px;
+/* Header subtitle */
+.header-subtitle {
     color: var(--text-secondary);
-    opacity: 0.7;
-    letter-spacing: 0.15em;
-    margin-bottom: 8px;
-    overflow: hidden;
-    white-space: nowrap;
-}
-
-.fsr-banner-track {
-    display: inline-block;
-    animation: fsr-scroll 25s linear infinite;
-}
-
-.fsr-banner-inner {
-    display: inline-block;
-    padding-right: 2em;
-}
-
-.fsr-banner:hover .fsr-banner-track {
-    animation-play-state: paused;
-}
-
-@keyframes fsr-scroll {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
-}
-
-.fsr-tagline {
-    /* inherits from header p */
-}
-
-.fsr-legal {
-    font-size: 11px !important;
-    color: var(--text-secondary) !important;
-    opacity: 0.8;
-    margin-top: 8px;
-}
-
-.fsr-badge {
-    font-size: 10px;
+    font-size: 15px;
     font-weight: 500;
-    color: var(--accent);
-    background: rgba(59, 130, 246, 0.15);
-    padding: 2px 8px;
-    border-radius: 6px;
-    margin-left: 8px;
 }
 
-.fsr-footer {
+/* Page footer */
+.page-footer {
     text-align: center;
-    margin-top: 32px;
+    margin-top: 40px;
     padding-top: 24px;
     border-top: 1px solid var(--border);
 }
 
-.fsr-footer p {
+.page-footer p {
     color: var(--text-secondary);
     font-size: 14px;
     margin-bottom: 4px;
 }
 
-.fsr-footer-tiny {
-    font-size: 10px !important;
+.page-footer a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.page-footer a:hover {
+    color: var(--accent-hover);
+}
+
+.page-footer .footer-brand {
+    font-size: 11px;
     opacity: 0.6;
-    margin-top: 8px;
+    margin-top: 12px;
 }
 
 /* Header */
 header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 36px;
 }
 
 .header-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 56px;
-    height: 56px;
-    background: linear-gradient(135deg, #3b82f6 0%, #2dd4bf 100%);
-    border-radius: 16px;
+    width: 52px;
+    height: 52px;
+    background: linear-gradient(145deg, var(--accent) 0%, #3b82f6 100%);
+    border-radius: 14px;
     margin-bottom: 16px;
     color: white;
-    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.2);
 }
 
 h1 {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     margin-bottom: 4px;
+}
+
+h1 .flag {
+    font-size: 0.85em;
+    margin-left: 4px;
+    vertical-align: -0.1em;
 }
 
 header p {
@@ -175,14 +127,20 @@ header p {
     border-radius: var(--border-radius);
     padding: 24px;
     margin-bottom: 20px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.card:hover {
+    border-color: rgba(37, 99, 235, 0.2);
 }
 
 h2 {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     margin-bottom: 20px;
     color: var(--text-primary);
+    letter-spacing: -0.01em;
 }
 
 .helper-text {
@@ -192,80 +150,48 @@ h2 {
     line-height: 1.6;
 }
 
-/* Toggle Switch */
-.toggle-container {
+/* Mode Selector (3-way) */
+.mode-selector {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: center;
-    gap: 16px;
+    gap: 0;
     margin: 24px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #f1f5f9;
 }
 
-.toggle-label {
+.mode-btn {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 15px;
     font-weight: 500;
-    font-size: 16px;
+    font-family: inherit;
+    border: none;
+    background: transparent;
     color: var(--text-secondary);
-    transition: color 0.3s;
-}
-
-.toggle-label.active {
-    color: var(--text-primary);
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 64px;
-    height: 32px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--border);
-    transition: .4s;
+    transition: background 0.2s, color 0.2s;
 }
 
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 24px;
-    width: 24px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: .4s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+.mode-btn:hover {
+    color: var(--text-primary);
+    background: var(--accent-muted);
 }
 
-input:checked + .slider {
-    background-color: var(--accent);
+.mode-btn.active {
+    background: var(--accent);
+    color: white;
 }
 
-input:focus + .slider {
-    box-shadow: 0 0 1px var(--accent);
+.mode-btn + .mode-btn {
+    border-left: 1px solid var(--border);
 }
 
-input:checked + .slider:before {
-    transform: translateX(32px);
-}
-
-.slider.round {
-    border-radius: 34px;
-}
-
-.slider.round:before {
-    border-radius: 50%;
+.mode-btn.active + .mode-btn {
+    border-left-color: rgba(255, 255, 255, 0.25);
 }
 
 /* Input Group */
@@ -276,7 +202,7 @@ input:checked + .slider:before {
 
 input[type="text"] {
     flex: 1;
-    background-color: var(--bg-color);
+    background-color: #ffffff;
     border: 1px solid var(--border);
     color: var(--text-primary);
     padding: 12px 16px;
@@ -290,11 +216,11 @@ input[type="text"] {
 input[type="text"]:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 input[type="text"]::placeholder {
-    color: #475569;
+    color: #94a3b8;
     text-transform: none;
 }
 
@@ -338,15 +264,15 @@ input[type="text"]::placeholder {
 }
 
 .status-message.success {
-    background-color: rgba(16, 185, 129, 0.1);
+    background-color: rgba(5, 150, 105, 0.1);
     color: var(--success);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(5, 150, 105, 0.2);
 }
 
 .status-message.error {
-    background-color: rgba(239, 68, 68, 0.1);
+    background-color: rgba(220, 38, 38, 0.08);
     color: var(--error);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(220, 38, 38, 0.2);
 }
 
 /* Matrix Preview Card */
@@ -369,7 +295,7 @@ input[type="text"]::placeholder {
     font-size: 12px;
     font-weight: 500;
     color: var(--text-secondary);
-    background: var(--bg-color);
+    background: #f1f5f9;
     padding: 4px 10px;
     border-radius: 8px;
     border: 1px solid var(--border);
@@ -384,13 +310,13 @@ input[type="text"]::placeholder {
 }
 
 .matrix-bezel {
-    background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
+    background: linear-gradient(145deg, #334155 0%, #1e293b 100%);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 10px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.04),
-        0 4px 24px rgba(0, 0, 0, 0.4);
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 4px 20px rgba(0, 0, 0, 0.1);
     max-width: 100%;
 }
 
@@ -434,7 +360,7 @@ input[type="text"]::placeholder {
 }
 
 .btn-test {
-    background: var(--bg-color);
+    background: #f1f5f9;
     border: 1px solid var(--border);
     color: var(--text-secondary);
     padding: 5px 10px;
@@ -453,7 +379,7 @@ input[type="text"]::placeholder {
 .btn-test.active {
     border-color: var(--accent);
     color: var(--accent);
-    background: rgba(59, 130, 246, 0.08);
+    background: var(--accent-muted);
 }
 
 /* Flight Info Card */
@@ -474,7 +400,7 @@ input[type="text"]::placeholder {
     height: 40px;
     object-fit: contain;
     border-radius: 8px;
-    background: white;
+    background: #f8fafc;
     padding: 4px;
     flex-shrink: 0;
 }
@@ -490,7 +416,7 @@ input[type="text"]::placeholder {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-secondary);
-    background: var(--bg-color);
+    background: #f1f5f9;
     padding: 3px 8px;
     border-radius: 6px;
     border: 1px solid var(--border);
@@ -498,7 +424,7 @@ input[type="text"]::placeholder {
 
 .fi-route {
     font-size: 16px;
-    color: #7dd3fc;
+    color: #2563eb;
     font-weight: 500;
     margin-bottom: 12px;
 }
@@ -518,8 +444,196 @@ input[type="text"]::placeholder {
     color: var(--text-primary);
 }
 
+/* Arrivals Board Card */
+.arrivals-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.arrivals-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.arrivals-row .arr-callsign {
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 80px;
+}
+
+.arrivals-row .arr-route {
+    color: #2563eb;
+    flex: 1;
+    text-align: center;
+}
+
+.arrivals-row .arr-eta {
+    font-weight: 500;
+    color: var(--success);
+    min-width: 70px;
+    text-align: right;
+}
+
+/* Page Navigation */
+.page-nav {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.page-nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 8px;
+    transition: color 0.2s, background 0.2s;
+}
+
+.page-nav a:hover {
+    color: var(--text-primary);
+    background: var(--accent-muted);
+}
+
+.page-nav a.active {
+    color: var(--accent);
+    background: var(--accent-muted);
+}
+
+/* Stats Page */
+.stats-total {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.airline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.airline-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 15px;
+}
+
+.airline-rank {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: white;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.airline-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.airline-count {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.altitude-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 12px;
+}
+
+.alt-card {
+    padding: 16px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.alt-card.lowest {
+    background: linear-gradient(135deg, rgba(5, 150, 105, 0.1) 0%, rgba(5, 150, 105, 0.04) 100%);
+    border: 1px solid rgba(5, 150, 105, 0.25);
+}
+
+.alt-card.highest {
+    background: linear-gradient(135deg, var(--accent-muted) 0%, rgba(37, 99, 235, 0.04) 100%);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.alt-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.alt-value {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.alt-card.lowest .alt-value { color: var(--success); }
+.alt-card.highest .alt-value { color: var(--accent); }
+
+.alt-details {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.busiest-hour {
+    margin-top: 12px;
+    padding: 16px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.busiest-time {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.busiest-count {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
 /* Mobile Adjustments */
 @media (max-width: 480px) {
+    .altitude-cards {
+        grid-template-columns: 1fr;
+    }
+
     .input-group {
         flex-direction: column;
     }

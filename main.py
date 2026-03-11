@@ -569,6 +569,18 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
         return image
 
     callsign      = (flight_data.get("callsign") or "").strip().upper()
+    
+    # Try to resolve full airline name + flight number
+    icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
+    airline_name = flight_data.get("airline_name") or AIRLINE_NAMES.get(icao_code, "")
+    if airline_name and callsign.startswith(icao_code):
+        flight_num = callsign[len(icao_code):]
+        display_callsign = f"{airline_name} {flight_num}".strip()
+    elif airline_name:
+        display_callsign = airline_name
+    else:
+        display_callsign = callsign
+
     origin        = (flight_data.get("origin_iata") or flight_data.get("origin") or "").strip().upper() or "N/A"
     dest          = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
     alt           = flight_data.get("altitude", 0) or 0
@@ -581,8 +593,8 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     TEXT_X = 19
     TEXT_W = 64 - TEXT_X  # 45px
 
-    # Line 1 (y=1): Callsign (FONT_6X10, Yellow)
-    _draw_scrolling_text(image, callsign, FONT_6X10, (255, 220, 0), TEXT_X, 1, TEXT_W, current_time)
+    # Line 1 (y=2): Airline Name + Flight Number (FONT_5X8, Yellow)
+    _draw_scrolling_text(image, display_callsign, FONT_5X8, (255, 220, 0), TEXT_X, 2, TEXT_W, current_time)
     
     # Line 2 (y=12): Route (FONT_5X8, Cyan)
     route_text = f"{origin} - {dest}"

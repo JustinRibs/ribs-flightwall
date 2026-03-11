@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Settings — Update and restart Ribs FlightWall">
+    <title>Settings | Ribs FlightWall</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <nav class="page-nav">
+                <a href="/">Control</a>
+                <a href="/stats">Stats</a>
+                <a href="/settings" class="active">Settings</a>
+            </nav>
+            <div class="header-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </div>
+            <h1>Settings <span class="flag" aria-hidden="true">🇭🇷</span></h1>
+            <p class="header-subtitle">Update and manage the FlightWall service</p>
+        </header>
+
+        <main>
+            <div class="card">
+                <h2>Update & Restart</h2>
+                <p class="helper-text">
+                    Pull the latest code from the remote repository and restart the flightwall service.
+                    The page may briefly disconnect while the service restarts.
+                </p>
+                <button type="button" id="update-restart-btn" class="btn-primary">
+                    Update & Restart
+                </button>
+                <div id="update-result" class="status-message update-result" style="margin-top: 1rem; text-align: left; white-space: pre-wrap;"></div>
+            </div>
+        </main>
+
+        <footer class="page-footer">
+            <p>Ribs FlightWall</p>
+            <p><a href="/">Back to Control Panel</a></p>
+            <p class="footer-brand">Ribs Full Stack inc. ™</p>
+        </footer>
+    </div>
+
+    <script>
+        document.getElementById('update-restart-btn').addEventListener('click', async function () {
+            const btn = this;
+            const resultEl = document.getElementById('update-result');
+            btn.disabled = true;
+            resultEl.textContent = 'Updating…';
+            resultEl.className = 'status-message';
+
+            try {
+                const resp = await fetch('/api/update-and-restart', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.ok) {
+                    resultEl.textContent = data.message + (data.stdout ? '\n' + data.stdout : '');
+                    resultEl.className = 'status-message show success';
+                    setTimeout(function () {
+                        window.location.reload();
+                    }, 3000);
+                } else {
+                    resultEl.textContent = (data.message || 'Update failed') + (data.stderr ? '\n' + data.stderr : '');
+                    resultEl.className = 'status-message show error';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                resultEl.textContent = 'Request failed. The service may be restarting.';
+                resultEl.className = 'status-message show error';
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

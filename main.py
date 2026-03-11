@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import time
 import threading
@@ -996,6 +997,74 @@ def debug_matrix():
     if not os.path.exists(DEBUG_IMAGE_PATH):
         return "Image not found", 404
     return send_file(DEBUG_IMAGE_PATH, mimetype='image/png')
+
+
+# --- Settings ---
+
+SERVICE_NAME = "flightwall"  # systemd service name (flightwall.service)
+
+
+def _schedule_restart():
+    """Schedule systemctl restart in a background thread (allows HTTP response to be sent first)."""
+    def _restart():
+        time.sleep(1.5)
+        try:
+            subprocess.run(["sudo", "systemctl", "restart", SERVICE_NAME], check=True, capture_output=True, text=True)
+            logging.info("flightwall service restarted successfully")
+        except FileNotFoundError:
+            logging.warning("systemctl not found (likely not on Raspberry Pi)")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"systemctl restart failed: {e.stderr or e}")
+
+    thread = threading.Thread(target=_restart, daemon=True)
+    thread.start()
+
+
+@app.route('/settings')
+def settings_page():
+    return render_template('settings.html', matrix_available=MATRIX_AVAILABLE)
+
+
+@app.route('/api/update-and-restart', methods=['POST'])
+def api_update_and_restart():
+    """
+    Run git pull in the project directory, then restart the flightwall systemd service.
+    Returns git output. Service restart happens ~1.5s after response is sent.
+    """
+    try:
+        repo_dir = BASE_DIR
+        result = subprocess.run(
+            ["git", "pull"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+
+        if result.returncode != 0:
+            return jsonify({
+                "ok": False,
+                "message": "git pull failed",
+                "stdout": stdout,
+                "stderr": stderr,
+                "returncode": result.returncode,
+            }), 500
+
+        _schedule_restart()
+        return jsonify({
+            "ok": True,
+            "message": "Updated successfully. Service restarting in a few seconds…",
+            "stdout": stdout.strip() or "(no output)",
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "message": "git pull timed out"}), 500
+    except FileNotFoundError:
+        return jsonify({"ok": False, "message": "git not found"}), 500
+    except Exception as e:
+        logging.error(f"update-and-restart error: {e}")
+        return jsonify({"ok": False, "message": str(e)}), 500
 
 # Preset test flights for dev/layout testing
 TEST_FLIGHTS = {

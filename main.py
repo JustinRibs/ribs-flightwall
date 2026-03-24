@@ -71,11 +71,12 @@ def _load_matrix_brightness() -> int:
 
 # Global Application State
 app_state = {
-    "mode": "radius",       # "radius", "monitor", or "arrivals"
+    "mode": "radius",       # "radius", "monitor", "arrivals", or "sports"
     "callsign": "",         # Target callsign for monitor mode
     "airport": "",          # Target airport IATA/ICAO for arrivals mode (e.g. JFK, KJFK)
     "current_flight": None, # Cache the latest flight data
     "current_arrivals": [], # List of arrivals for arrivals mode
+    "current_sports": None, # NHL score dict for sports mode (Islanders)
     "last_seen_flight": None, # Last flight seen in radius mode (shown when nothing in range)
     "matrix_brightness": _load_matrix_brightness(),
 }
@@ -83,6 +84,8 @@ state_lock = threading.Lock()
 
 # Constants
 AEROAPI_URL = "https://aeroapi.flightaware.com/aeroapi"
+NHL_SCOREBOARD_URL = "https://api-web.nhle.com/v1/scoreboard/now"
+SPORTS_NHL_TEAM_ABBREV = "NYI"  # New York Islanders (sports mode)
 
 # Airline ICAO → website domain for logo.dev lookups
 AIRLINE_DOMAINS = {
@@ -640,6 +643,139 @@ def fetch_fr24_data():
         logging.error(f"FlightRadar24 API Error: {e}")
         return None
 
+
+def _empty_sports_payload(team: str, status: str, status_text: str) -> dict:
+    return {
+        "status": status,
+        "team": team,
+        "matchup": "",
+        "away_abbrev": "",
+        "home_abbrev": "",
+        "away_score": 0,
+        "home_score": 0,
+        "status_text": status_text,
+    }
+
+
+def _nhl_game_sort_key(game: dict) -> tuple:
+    """Sort: live first, then pregame, then future, then finished (newest id last)."""
+    s = (game.get("gameState") or "").upper()
+    if s == "LIVE":
+        tier = 0
+    elif s in ("PRE", "CRIT"):
+        tier = 1
+    elif s in ("FUT",):
+        tier = 2
+    elif s == "OFF":
+        tier = 3
+    else:
+        tier = 2
+    gid = game.get("id")
+    try:
+        gid_i = int(gid) if gid is not None else 0
+    except (TypeError, ValueError):
+        gid_i = 0
+    return (tier, -gid_i)
+
+
+def _nhl_pregame_status_text(game: dict) -> str:
+    st = game.get("startTimeUTC") or ""
+    if not st:
+        return "NEXT"
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        dt = datetime.fromisoformat(st.replace("Z", "+00:00"))
+        local = dt.astimezone(ZoneInfo("America/New_York"))
+        h = local.hour % 12 or 12
+        ampm = "PM" if local.hour >= 12 else "AM"
+        return f"{h}:{local.minute:02d} {ampm} ET"
+    except Exception:
+        return "NEXT"
+
+
+def _normalize_nhl_game(game: dict, team: str) -> dict:
+    away = game.get("awayTeam") or {}
+    home = game.get("homeTeam") or {}
+    aa = (away.get("abbrev") or "").strip().upper()
+    ha = (home.get("abbrev") or "").strip().upper()
+    try:
+        away_sc = int(away.get("score", 0))
+    except (TypeError, ValueError):
+        away_sc = 0
+    try:
+        home_sc = int(home.get("score", 0))
+    except (TypeError, ValueError):
+        home_sc = 0
+
+    matchup = f"{aa} @ {ha}" if aa and ha else team
+
+    gs = (game.get("gameState") or "").upper()
+    if gs == "OFF":
+        status = "final"
+        status_text = "FINAL"
+    elif gs == "LIVE":
+        status = "live"
+        interm = game.get("intermissionInfo")
+        if interm:
+            status_text = "INT"
+        else:
+            pd = game.get("periodDescriptor") or {}
+            period = pd.get("number")
+            clk = game.get("clock") or {}
+            rem = (clk.get("timeRemaining") or "").strip()
+            if period and rem:
+                status_text = f"P{period} {rem}"
+            elif period:
+                status_text = f"P{period} LIVE"
+            else:
+                status_text = "LIVE"
+    else:
+        status = "pregame"
+        status_text = _nhl_pregame_status_text(game)
+
+    return {
+        "status": status,
+        "team": team,
+        "matchup": matchup,
+        "away_abbrev": aa,
+        "home_abbrev": ha,
+        "away_score": away_sc,
+        "home_score": home_sc,
+        "status_text": status_text,
+    }
+
+
+def fetch_nhl_team_game(team_abbrev: str) -> dict:
+    """
+    Fetch NHL scoreboard and return a normalized dict for the given team abbrev.
+    Always returns a dict (error / no_game use status field).
+    """
+    team = (team_abbrev or "").strip().upper() or SPORTS_NHL_TEAM_ABBREV
+
+    try:
+        resp = requests.get(NHL_SCOREBOARD_URL, timeout=12)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logging.warning(f"NHL scoreboard fetch failed: {e}")
+        return _empty_sports_payload(team, "error", "Unavailable")
+
+    candidates = []
+    for day in data.get("gamesByDate") or []:
+        for g in day.get("games") or []:
+            away = ((g.get("awayTeam") or {}).get("abbrev") or "").strip().upper()
+            home = ((g.get("homeTeam") or {}).get("abbrev") or "").strip().upper()
+            if away == team or home == team:
+                candidates.append(g)
+
+    if not candidates:
+        return _empty_sports_payload(team, "no_game", "No game")
+
+    candidates.sort(key=_nhl_game_sort_key)
+    return _normalize_nhl_game(candidates[0], team)
+
+
 def _format_alt_speed(alt, spd):
     """Build compact altitude/speed variants from verbose to minimal."""
     alt_str = f"{alt // 1000}k" if alt >= 1000 else str(alt)
@@ -912,6 +1048,38 @@ def _build_arrivals_image(arrivals: list, airport_code: str, current_time: float
     return image
 
 
+def _build_sports_image(sports_data: dict | None, current_time: float) -> Image.Image:
+    """64×32 Islanders / NHL score view for sports mode."""
+    image = Image.new("RGB", (64, 32), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    if not sports_data:
+        _draw_scrolling_text(image, "NYI", FONT_6X10, (255, 220, 0), 0, 2, 64, current_time)
+        draw.text((2, 16), "No data", font=FONT_5X8, fill=(120, 120, 120))
+        return image
+
+    st = sports_data.get("status") or ""
+    if st == "error":
+        _draw_scrolling_text(image, "NYI", FONT_6X10, (255, 220, 0), 0, 2, 64, current_time)
+        draw.text((2, 16), "Unavail", font=FONT_5X8, fill=(120, 120, 120))
+        return image
+    if st == "no_game":
+        _draw_scrolling_text(image, "ISLANDERS", FONT_5X8, (255, 220, 0), 0, 2, 64, current_time)
+        draw.text((4, 14), "No game", font=FONT_5X8, fill=(100, 100, 100))
+        return image
+
+    matchup = (sports_data.get("matchup") or "NYI").strip()
+    ascore = sports_data.get("away_score", 0)
+    hscore = sports_data.get("home_score", 0)
+    score_line = f"{ascore} - {hscore}"
+    status_text = (sports_data.get("status_text") or "").strip()
+
+    _draw_scrolling_text(image, matchup, FONT_5X8, (255, 220, 0), 0, 1, 64, current_time)
+    _draw_scrolling_text(image, score_line, FONT_5X8, (0, 220, 255), 0, 11, 64, current_time)
+    _draw_scrolling_text(image, status_text, FONT_5X8, (0, 220, 0), 0, 21, 64, current_time)
+    return image
+
+
 DEBUG_IMAGE_PATH = os.path.join(tempfile.gettempdir(), "ribs-flight-monitor_debug_matrix.png")
 
 
@@ -939,6 +1107,7 @@ def led_daemon_loop():
                 target_callsign = app_state["callsign"].strip().upper()
                 target_airport = app_state["airport"].strip().upper()
 
+            sports_data = None
             # 1. Fetch Data
             if current_mode == "radius":
                 flight_data = fetch_fr24_data()
@@ -949,6 +1118,10 @@ def led_daemon_loop():
             elif current_mode == "arrivals" and target_airport:
                 arrivals_data = fetch_arrivals_data(target_airport)
                 flight_data = None
+            elif current_mode == "sports":
+                flight_data = None
+                arrivals_data = []
+                sports_data = fetch_nhl_team_game(SPORTS_NHL_TEAM_ABBREV)
             else:
                 flight_data = None
                 arrivals_data = []
@@ -956,6 +1129,7 @@ def led_daemon_loop():
             with state_lock:
                 app_state["current_flight"] = flight_data
                 app_state["current_arrivals"] = arrivals_data
+                app_state["current_sports"] = sports_data if current_mode == "sports" else None
                 if current_mode == "radius" and flight_data:
                     app_state["last_seen_flight"] = flight_data
                     try:
@@ -973,8 +1147,12 @@ def led_daemon_loop():
                 sleep_sec = config.FR24_POLL_INTERVAL
             elif current_mode == "monitor":
                 sleep_sec = config.MONITOR_POLL_INTERVAL
-            else:
+            elif current_mode == "arrivals":
                 sleep_sec = config.ARRIVALS_POLL_INTERVAL
+            elif current_mode == "sports":
+                sleep_sec = config.SPORTS_POLL_INTERVAL
+            else:
+                sleep_sec = config.FR24_POLL_INTERVAL
 
             poll_start = time.monotonic()
             while time.monotonic() - poll_start < sleep_sec:
@@ -990,6 +1168,8 @@ def led_daemon_loop():
                             pass
                 if current_mode == "arrivals":
                     _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
+                elif current_mode == "sports":
+                    _display_image(matrix, _build_sports_image(sports_data, current_time))
                 else:
                     _display_image(matrix, _build_flight_image(render_flight, current_time))
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
@@ -1012,7 +1192,8 @@ def get_state():
             "callsign": app_state["callsign"],
             "airport": app_state["airport"],
             "current_flight": app_state["current_flight"],
-            "current_arrivals": app_state["current_arrivals"]
+            "current_arrivals": app_state["current_arrivals"],
+            "current_sports": app_state["current_sports"],
         })
 
 @app.route('/api/state', methods=['POST'])
@@ -1022,7 +1203,7 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "sports"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
             
@@ -1222,6 +1403,17 @@ TEST_ARRIVALS = [
     {"callsign": "DAL789", "origin_iata": "ATL", "eta": "3:30 PM", "airline_icao": "DAL"},
 ]
 
+TEST_SPORTS = {
+    "status": "live",
+    "team": "NYI",
+    "matchup": "NYI @ TOR",
+    "away_abbrev": "NYI",
+    "home_abbrev": "TOR",
+    "away_score": 3,
+    "home_score": 2,
+    "status_text": "P2 8:42",
+}
+
 @app.route('/debug/test-render', methods=['POST'])
 def debug_test_render():
     """Render a test flight or arrivals board to debug_matrix.png without calling any external API."""
@@ -1232,6 +1424,10 @@ def debug_test_render():
     if preset == "arrivals":
         _display_image(None, _build_arrivals_image(TEST_ARRIVALS, "JFK", simulated_time))
         return jsonify({"status": "ok", "preset": preset, "arrivals": TEST_ARRIVALS})
+
+    if preset == "sports":
+        _display_image(None, _build_sports_image(TEST_SPORTS, simulated_time))
+        return jsonify({"status": "ok", "preset": preset, "sports": TEST_SPORTS})
 
     flight = TEST_FLIGHTS.get(preset, TEST_FLIGHTS["with_logo"])
     render_to_matrix(None, flight, simulated_time)

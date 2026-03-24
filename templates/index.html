@@ -36,6 +36,7 @@
                     <button type="button" class="mode-btn active" data-mode="radius" id="btn-radius">Radius</button>
                     <button type="button" class="mode-btn" data-mode="monitor" id="btn-monitor">Monitor</button>
                     <button type="button" class="mode-btn" data-mode="arrivals" id="btn-arrivals">Arrivals</button>
+                    <button type="button" class="mode-btn" data-mode="sports" id="btn-sports">Sports</button>
                 </div>
 
                 <p class="helper-text" id="mode-helper">
@@ -89,6 +90,17 @@
                 <div id="arrivals-list" class="arrivals-list"></div>
                 <p class="helper-text" id="arrivals-none" style="display:none;">No arrivals loaded. Enter an airport code above.</p>
             </div>
+
+            <div class="card sports-card" id="sports-card" style="display:none;">
+                <h2>Sports</h2>
+                <p class="helper-text sports-team-label">New York Islanders</p>
+                <div class="sports-body">
+                    <div id="sports-matchup" class="sports-matchup"></div>
+                    <div id="sports-score" class="sports-score"></div>
+                    <div id="sports-status" class="sports-status"></div>
+                </div>
+                <p class="helper-text" id="sports-placeholder" style="display:none;">Loading score…</p>
+            </div>
             
             {% if not matrix_available %}
             <div class="card matrix-card">
@@ -110,6 +122,7 @@
                     <button class="btn-test" data-preset="no_logo">No Logo</button>
                     <button class="btn-test" data-preset="no_flight">No Flight</button>
                     <button class="btn-test" data-preset="arrivals">Arrivals</button>
+                    <button class="btn-test" data-preset="sports">Sports</button>
                 </div>
                 <p class="helper-text matrix-helper">
                     Dev mode — hardware matrix not detected. Preview refreshes every 2s.

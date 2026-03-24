@@ -37,4 +37,5 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))  # Seconds between monitor
 FR24_POLL_INTERVAL = int(os.getenv("FR24_POLL_INTERVAL", "10"))  # CRITICAL: 10s for FlightRadar24 to avoid IP-block
 MONITOR_POLL_INTERVAL = int(os.getenv("MONITOR_POLL_INTERVAL", "60"))  # FlightAware (avoid high costs)
 ARRIVALS_POLL_INTERVAL = int(os.getenv("ARRIVALS_POLL_INTERVAL", "90"))  # Arrivals board (AeroAPI)
+SPORTS_POLL_INTERVAL = int(os.getenv("SPORTS_POLL_INTERVAL", "60"))  # NHL scoreboard (sports mode)
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5003")) # Use 5001 locally, override to 80 on Pi in .env

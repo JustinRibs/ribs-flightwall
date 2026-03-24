@@ -144,9 +144,10 @@ h2 {
     line-height: 1.6;
 }
 
-/* Mode Selector (3-way) */
+/* Mode Selector */
 .mode-selector {
     display: flex;
+    flex-wrap: wrap;
     align-items: stretch;
     justify-content: center;
     gap: 0;
@@ -471,6 +472,45 @@ input[type="text"]::placeholder {
 
 .fi-stat strong {
     color: var(--text-primary);
+}
+
+/* Sports score card */
+.sports-card h2 {
+    margin-bottom: 8px;
+}
+
+.sports-team-label {
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+
+.sports-body {
+    text-align: center;
+    padding: 12px 8px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.sports-matchup {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.sports-score {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.sports-status {
+    font-size: 15px;
+    color: var(--text-secondary);
+    font-weight: 500;
 }
 
 /* Arrivals Board Card */

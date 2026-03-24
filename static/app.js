@@ -19,6 +19,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const arrivalsList = document.getElementById('arrivals-list');
     const arrivalsNone = document.getElementById('arrivals-none');
     const arrivalsAirport = document.getElementById('arrivals-airport');
+    const sportsCard = document.getElementById('sports-card');
+    const sportsMatchup = document.getElementById('sports-matchup');
+    const sportsScore = document.getElementById('sports-score');
+    const sportsStatus = document.getElementById('sports-status');
+    const sportsBody = document.querySelector('.sports-body');
+    const sportsPlaceholder = document.getElementById('sports-placeholder');
 
     // Fetch initial state and start polling for live flight data
     fetchState();
@@ -126,10 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateArrivalsCard(state.current_arrivals, state.airport);
                 if (flightCard) flightCard.style.display = 'none';
                 if (arrivalsCard) arrivalsCard.style.display = 'block';
+                if (sportsCard) sportsCard.style.display = 'none';
+            } else if (state.mode === 'sports') {
+                updateSportsCard(state.current_sports);
+                if (flightCard) flightCard.style.display = 'none';
+                if (arrivalsCard) arrivalsCard.style.display = 'none';
+                if (sportsCard) sportsCard.style.display = 'block';
             } else {
                 updateFlightCard(state.current_flight);
                 if (flightCard) flightCard.style.display = 'block';
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
+                if (sportsCard) sportsCard.style.display = 'none';
             }
         } catch (error) {
             console.error('Error fetching state:', error);
@@ -198,6 +211,41 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
     }
 
+    function updateSportsCard(sports) {
+        if (!sportsCard || !sportsMatchup || !sportsScore || !sportsStatus) return;
+        sportsCard.style.display = 'block';
+
+        if (!sports) {
+            if (sportsBody) sportsBody.style.display = 'none';
+            if (sportsPlaceholder) sportsPlaceholder.style.display = 'block';
+            return;
+        }
+        if (sportsBody) sportsBody.style.display = 'block';
+        if (sportsPlaceholder) sportsPlaceholder.style.display = 'none';
+
+        const st = sports.status || '';
+        if (st === 'error') {
+            sportsMatchup.textContent = 'New York Islanders';
+            sportsScore.textContent = '—';
+            sportsStatus.textContent = sports.status_text || 'Score unavailable';
+            return;
+        }
+        if (st === 'no_game') {
+            sportsMatchup.textContent = 'New York Islanders';
+            sportsScore.textContent = '—';
+            sportsStatus.textContent = sports.status_text || 'No game';
+            return;
+        }
+
+        sportsMatchup.textContent = sports.matchup || 'NYI';
+        const a = sports.away_abbrev || '';
+        const h = sports.home_abbrev || '';
+        const as = sports.away_score != null ? sports.away_score : 0;
+        const hs = sports.home_score != null ? sports.home_score : 0;
+        sportsScore.textContent = `${a} ${as}  ·  ${hs} ${h}`;
+        sportsStatus.textContent = sports.status_text || '';
+    }
+
     async function updateServerState(data) {
         const response = await fetch('/api/state', {
             method: 'POST',
@@ -221,6 +269,10 @@ document.addEventListener('DOMContentLoaded', () => {
             airportSection.style.display = 'block';
             modeHelper.innerHTML = '<strong>Arrivals Mode:</strong> Shows an airport arrivals board on the matrix. Enter an airport code (e.g. JFK).';
             if (window.innerWidth > 480) setTimeout(() => airportInput.focus(), 50);
+        } else if (mode === 'sports') {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Sports Mode:</strong> Shows the New York Islanders score on the matrix (NHL). More teams can be added later.';
         } else {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'none';

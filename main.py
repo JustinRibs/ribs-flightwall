@@ -582,6 +582,7 @@ def fetch_fr24_data():
         from types import SimpleNamespace
         home_pos = SimpleNamespace(latitude=config.HOME_LAT, longitude=config.HOME_LON)
         closest = min(qualified, key=lambda f: f.get_distance_from(home_pos))
+        distance_km = round(closest.get_distance_from(home_pos), 1)
 
         # Get route details (can timeout or return incomplete JSON)
         orig = str(closest.origin_airport_iata or "").strip().upper()
@@ -634,6 +635,9 @@ def fetch_fr24_data():
             "airline_name": AIRLINE_NAMES.get(airline_icao, ""),
             "aircraft_model": aircraft_model or aircraft_code,  # full name for web UI
             "aircraft_code": aircraft_code,  # short ICAO type for matrix (e.g. "A321")
+            "heading": int(getattr(closest, "heading", 0) or 0) % 360,
+            "vertical_speed": int(getattr(closest, "vertical_speed", 0) or 0),
+            "distance_km": distance_km,
         }
 
     except Exception as e:
@@ -753,9 +757,12 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     dest          = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
     alt           = flight_data.get("altitude", 0) or 0
     spd           = flight_data.get("speed", 0) or 0
-    alt_k         = f"{alt // 1000}k" if alt >= 1000 else str(alt)
-    spd_kt        = int(round(spd))
-    aircraft_code = (flight_data.get("aircraft_code") or "").strip().upper()
+    alt_k          = f"{alt // 1000}k" if alt >= 1000 else str(alt)
+    spd_kt         = int(round(spd))
+    aircraft_code  = (flight_data.get("aircraft_code") or "").strip().upper()
+    heading        = flight_data.get("heading", 0) or 0
+    vertical_speed = flight_data.get("vertical_speed", 0) or 0
+    distance_km    = flight_data.get("distance_km", None)
 
     # --- Right zone text: 4 lines (FONT_5X8 5x8), single cycling line ---
     TEXT_X = 19
@@ -768,9 +775,15 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     route_text = f"{origin} - {dest}"
     _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 8, TEXT_W, current_time % 8.0)
 
-    # Line 3 (y=16): Altitude + Speed (Green) - static
-    alt_spd_text = f"{alt_k} {spd_kt}kt"
-    _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 16, TEXT_W, current_time)
+    # Line 3 (y=16): Altitude + Speed — color/prefix reflects climb/descent
+    if vertical_speed > 200:
+        vs_prefix, alt_color = "^", (0, 255, 100)   # climbing: bright green
+    elif vertical_speed < -200:
+        vs_prefix, alt_color = "v", (255, 100, 0)   # descending: orange-red
+    else:
+        vs_prefix, alt_color = "", (0, 220, 0)       # level: steady green
+    alt_spd_text = f"{vs_prefix}{alt_k} {spd_kt}kt"
+    _draw_scrolling_text(image, alt_spd_text, FONT_5X8, alt_color, TEXT_X, 16, TEXT_W, current_time)
 
     # Line 4 (y=19): Single cycling line - Aircraft code vs From/To airport name
     origin_name_raw = flight_data.get("origin_name", "") or AIRPORT_NAMES.get(origin, "")
@@ -845,6 +858,27 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
 
         # Paste onto canvas at (0, 8) using alpha as mask
         image.paste(centered, (0, 8), centered)
+
+    # --- Heading arrow: top-left dead zone (y=0-7, x=0-7) ---
+    arrow_canvas = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    arrow_draw = ImageDraw.Draw(arrow_canvas)
+    # North-pointing arrow polygon (tip at top-center, 2px shaft)
+    arrow_draw.polygon([(4, 0), (0, 4), (3, 4), (3, 7), (5, 7), (5, 4), (8, 4)],
+                       fill=(0, 180, 200, 255))
+    # PIL rotate() is CCW; negate heading for clockwise geographic rotation
+    rotated_arrow = arrow_canvas.rotate(-heading, expand=False)
+    image.paste(rotated_arrow, (0, 0), rotated_arrow)
+
+    # --- Distance from home: bottom-left dead zone (y=25) ---
+    if distance_km is not None:
+        dist_text = f"{distance_km:.1f}k"
+        _draw_sharp(image, (1, 25), dist_text, FONT_THUMB, (255, 160, 0))
+
+    # --- Altitude bar: rightmost column (x=63), drawn last to stay on top ---
+    if alt > 0:
+        fill_h = max(1, int(min(alt, 40000) / 40000 * 32))
+        bar_top = 32 - fill_h
+        draw.line([(63, bar_top), (63, 31)], fill=(0, 100, 120))
 
     return image
 

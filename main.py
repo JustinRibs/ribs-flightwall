@@ -806,15 +806,18 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
     route_text = f"{origin} - {dest}"
     _draw_scrolling_text(image, route_text, FONT_5X8, (0, 220, 255), TEXT_X, 8, TEXT_W, current_time % 8.0)
 
-    # Line 3 (y=16): Altitude + Speed — color/prefix reflects climb/descent
+    # Line 3 (y=16): Altitude left (climb color), Speed right (yellow) — fixed, no scrolling
     if vertical_speed > 200:
         alt_color = (0, 255, 100)    # climbing: bright green
     elif vertical_speed < -200:
         alt_color = (255, 100, 0)    # descending: orange-red
     else:
         alt_color = (0, 220, 0)      # level: steady green
-    alt_spd_text = f"{alt_k} {spd_mph}mph"
-    _draw_scrolling_text(image, alt_spd_text, FONT_5X8, alt_color, TEXT_X, 16, TEXT_W, current_time)
+    spd_text = f"{spd_mph}m"
+    spd_w = int(draw.textlength(spd_text, font=FONT_5X8))
+    _draw_sharp(image, (TEXT_X, 16), alt_k, FONT_5X8, alt_color)
+    _draw_sharp(image, (63 - spd_w, 16), spd_text, FONT_5X8, (255, 220, 0))
+    alt_spd_text = f"{alt_k} {spd_mph}m"  # kept for line 4 fallback
 
     # Line 4 (y=19): Single cycling line - Aircraft code vs From/To airport name
     origin_name_raw = flight_data.get("origin_name", "") or AIRPORT_NAMES.get(origin, "")

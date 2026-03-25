@@ -156,6 +156,42 @@ AIRLINE_NAMES = {
     "TAM": "LATAM",     "LAN": "LATAM",
 }
 
+# ICAO aircraft type → short friendly name for matrix bottom row
+AIRCRAFT_NAMES = {
+    # Airbus
+    "A318": "A318", "A319": "A319", "A320": "A320", "A321": "A321",
+    "A19N": "A319neo", "A20N": "A320neo", "A21N": "A321neo",
+    "A332": "A330-200", "A333": "A330-300", "A338": "A330-800", "A339": "A330-900",
+    "A342": "A340-200", "A343": "A340-300",
+    "A359": "A350-900", "A35K": "A350-1000",
+    "A388": "A380",
+    # Boeing
+    "B712": "717",
+    "B732": "737-200", "B733": "737-300", "B734": "737-400", "B735": "737-500",
+    "B736": "737-600", "B737": "737-700", "B738": "737-800", "B739": "737-900",
+    "B37M": "737 MAX 7", "B38M": "737 MAX 8", "B39M": "737 MAX 9", "B3XM": "737 MAX 10",
+    "B741": "747-100", "B742": "747-200", "B743": "747-300", "B744": "747-400", "B748": "747-8",
+    "B752": "757-200", "B753": "757-300",
+    "B762": "767-200", "B763": "767-300", "B764": "767-400",
+    "B772": "777-200", "B77L": "777-200LR", "B773": "777-300", "B77W": "777-300ER",
+    "B778": "777X-8", "B779": "777X-9",
+    "B788": "787-8", "B789": "787-9", "B78X": "787-10",
+    # Embraer
+    "E135": "ERJ-135", "E145": "ERJ-145",
+    "E170": "E170", "E175": "E175", "E190": "E190", "E195": "E195",
+    "E75L": "E175-E2", "E75S": "E175", "E7W": "E190-E2", "E290": "E195-E2",
+    # Bombardier / CRJ
+    "CRJ1": "CRJ-100", "CRJ2": "CRJ-200", "CRJ7": "CRJ-700",
+    "CRJ9": "CRJ-900", "CRJX": "CRJ-1000",
+    # Dash 8 / ATR
+    "DH8A": "Dash 8-100", "DH8B": "Dash 8-200", "DH8C": "Dash 8-300", "DH8D": "Dash 8-400",
+    "AT45": "ATR 42", "AT76": "ATR 72",
+    # Legacy / other
+    "MD11": "MD-11", "MD82": "MD-82", "MD83": "MD-83", "MD88": "MD-88", "MD90": "MD-90",
+    "DC9": "DC-9", "DC10": "DC-10",
+    "C208": "Cessna Caravan", "PC12": "Pilatus PC-12",
+}
+
 # IATA → short airport/city name for matrix bottom row (max 9 chars to fit at x=2)
 AIRPORT_NAMES = {
     # New York area
@@ -772,12 +808,12 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
 
     # Line 3 (y=16): Altitude + Speed — color/prefix reflects climb/descent
     if vertical_speed > 200:
-        vs_prefix, alt_color = "^", (0, 255, 100)   # climbing: bright green
+        alt_color = (0, 255, 100)    # climbing: bright green
     elif vertical_speed < -200:
-        vs_prefix, alt_color = "v", (255, 100, 0)   # descending: orange-red
+        alt_color = (255, 100, 0)    # descending: orange-red
     else:
-        vs_prefix, alt_color = "", (0, 220, 0)       # level: steady green
-    alt_spd_text = f"{vs_prefix}{alt_k} {spd_mph}mph"
+        alt_color = (0, 220, 0)      # level: steady green
+    alt_spd_text = f"{alt_k} {spd_mph}mph"
     _draw_scrolling_text(image, alt_spd_text, FONT_5X8, alt_color, TEXT_X, 16, TEXT_W, current_time)
 
     # Line 4 (y=19): Single cycling line - Aircraft code vs From/To airport name
@@ -802,7 +838,7 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
 
     cycle = int(current_time / 12.0) % 2
     local_time_4 = current_time % 12.0
-    aircraft_display = aircraft_model or aircraft_code
+    aircraft_display = AIRCRAFT_NAMES.get(aircraft_code) or aircraft_code
     if cycle == 0:
         # Aircraft name (Magenta) or alt/speed fallback
         if aircraft_display:

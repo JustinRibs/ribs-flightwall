@@ -742,24 +742,19 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
 
     callsign      = (flight_data.get("callsign") or "").strip().upper()
     
-    # Try to resolve full airline name + flight number
+    # Show airline name only, fall back to raw callsign if name unavailable
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
     airline_name = flight_data.get("airline_name") or AIRLINE_NAMES.get(icao_code, "")
-    if airline_name and callsign.startswith(icao_code):
-        flight_num = callsign[len(icao_code):]
-        display_callsign = f"{airline_name} {flight_num}".strip()
-    elif airline_name:
-        display_callsign = airline_name
-    else:
-        display_callsign = callsign
+    display_callsign = airline_name or callsign
 
     origin        = (flight_data.get("origin_iata") or flight_data.get("origin") or "").strip().upper() or "N/A"
     dest          = (flight_data.get("dest_iata") or flight_data.get("destination") or "").strip().upper() or "N/A"
     alt           = flight_data.get("altitude", 0) or 0
     spd           = flight_data.get("speed", 0) or 0
     alt_k          = f"{alt // 1000}k" if alt >= 1000 else str(alt)
-    spd_kt         = int(round(spd))
+    spd_mph        = int(round((spd or 0) * 1.15078))
     aircraft_code  = (flight_data.get("aircraft_code") or "").strip().upper()
+    aircraft_model = (flight_data.get("aircraft_model") or "").strip()
     heading        = flight_data.get("heading", 0) or 0
     vertical_speed = flight_data.get("vertical_speed", 0) or 0
     distance_km    = flight_data.get("distance_km", None)
@@ -782,7 +777,7 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
         vs_prefix, alt_color = "v", (255, 100, 0)   # descending: orange-red
     else:
         vs_prefix, alt_color = "", (0, 220, 0)       # level: steady green
-    alt_spd_text = f"{vs_prefix}{alt_k} {spd_kt}kt"
+    alt_spd_text = f"{vs_prefix}{alt_k} {spd_mph}mph"
     _draw_scrolling_text(image, alt_spd_text, FONT_5X8, alt_color, TEXT_X, 16, TEXT_W, current_time)
 
     # Line 4 (y=19): Single cycling line - Aircraft code vs From/To airport name
@@ -807,10 +802,11 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
 
     cycle = int(current_time / 12.0) % 2
     local_time_4 = current_time % 12.0
+    aircraft_display = aircraft_model or aircraft_code
     if cycle == 0:
-        # Aircraft code (Magenta) or alt/speed fallback
-        if aircraft_code:
-            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
+        # Aircraft name (Magenta) or alt/speed fallback
+        if aircraft_display:
+            _draw_scrolling_text(image, aircraft_display, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
         else:
             _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 24, TEXT_W, local_time_4)
     else:
@@ -818,8 +814,8 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
         if name_line:
             _draw_arrow_prefix(image, TEXT_X, 24, name_arrow_up, (0, 220, 255))
             _draw_scrolling_text(image, name_line, FONT_5X8, (0, 220, 255), TEXT_X + 7, 24, TEXT_W - 7, local_time_4)
-        elif aircraft_code:
-            _draw_scrolling_text(image, aircraft_code, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
+        elif aircraft_display:
+            _draw_scrolling_text(image, aircraft_display, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
         else:
             _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 24, TEXT_W, local_time_4)
 
@@ -859,26 +855,10 @@ def _build_flight_image(flight_data, current_time: float) -> Image.Image:
         # Paste onto canvas at (0, 8) using alpha as mask
         image.paste(centered, (0, 8), centered)
 
-    # --- Heading arrow: top-left dead zone (y=0-7, x=0-7) ---
-    arrow_canvas = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
-    arrow_draw = ImageDraw.Draw(arrow_canvas)
-    # North-pointing arrow polygon (tip at top-center, 2px shaft)
-    arrow_draw.polygon([(4, 0), (0, 4), (3, 4), (3, 7), (5, 7), (5, 4), (8, 4)],
-                       fill=(0, 180, 200, 255))
-    # PIL rotate() is CCW; negate heading for clockwise geographic rotation
-    rotated_arrow = arrow_canvas.rotate(-heading, expand=False)
-    image.paste(rotated_arrow, (0, 0), rotated_arrow)
-
-    # --- Distance from home: bottom-left dead zone (y=25) ---
-    if distance_km is not None:
-        dist_text = f"{distance_km:.1f}k"
-        _draw_sharp(image, (1, 25), dist_text, FONT_THUMB, (255, 160, 0))
-
-    # --- Altitude bar: rightmost column (x=63), drawn last to stay on top ---
-    if alt > 0:
-        fill_h = max(1, int(min(alt, 40000) / 40000 * 32))
-        bar_top = 32 - fill_h
-        draw.line([(63, bar_top), (63, 31)], fill=(0, 100, 120))
+    # --- Cardinal direction: bottom-left dead zone (y=25) ---
+    _CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    cardinal = _CARDINALS[int((heading + 22.5) / 45) % 8]
+    _draw_sharp(image, (1, 25), cardinal, FONT_THUMB, (0, 180, 200))
 
     return image
 

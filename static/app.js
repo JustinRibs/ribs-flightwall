@@ -20,15 +20,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const arrivalsNone = document.getElementById('arrivals-none');
     const arrivalsAirport = document.getElementById('arrivals-airport');
     const sportsCard = document.getElementById('sports-card');
-    const sportsMatchup = document.getElementById('sports-matchup');
-    const sportsScore = document.getElementById('sports-score');
+    const sportsRowAway = document.getElementById('sports-row-away');
+    const sportsRowHome = document.getElementById('sports-row-home');
     const sportsStatus = document.getElementById('sports-status');
-    const sportsBody = document.querySelector('.sports-body');
     const sportsPlaceholder = document.getElementById('sports-placeholder');
 
-    // Fetch initial state and start polling for live flight data
+    let statePollHandle = null;
+    let currentPollMs = -1;
+
+    function setAdaptiveStatePoll(mode) {
+        const ms = mode === 'sports' ? 5000 : 10000;
+        if (ms === currentPollMs && statePollHandle) return;
+        currentPollMs = ms;
+        if (statePollHandle) clearInterval(statePollHandle);
+        statePollHandle = setInterval(fetchState, ms);
+    }
+
+    // Arm polling immediately (10s); first successful fetch may switch to 5s in sports mode
+    setAdaptiveStatePoll('radius');
     fetchState();
-    setInterval(fetchState, 10000);
 
     // Mode Button Events
     document.querySelectorAll('.mode-btn').forEach(btn => {
@@ -144,6 +154,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
                 if (sportsCard) sportsCard.style.display = 'none';
             }
+
+            setAdaptiveStatePoll(state.mode);
         } catch (error) {
             console.error('Error fetching state:', error);
             showStatus('Could not connect to Ribs FlightWall', 'error');
@@ -212,37 +224,53 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateSportsCard(sports) {
-        if (!sportsCard || !sportsMatchup || !sportsScore || !sportsStatus) return;
+        if (!sportsCard || !sportsStatus) return;
         sportsCard.style.display = 'block';
+        const body = sportsCard.querySelector('.sports-body');
 
         if (!sports) {
-            if (sportsBody) sportsBody.style.display = 'none';
+            if (body) body.style.display = 'none';
             if (sportsPlaceholder) sportsPlaceholder.style.display = 'block';
             return;
         }
-        if (sportsBody) sportsBody.style.display = 'block';
+        if (body) body.style.display = 'block';
         if (sportsPlaceholder) sportsPlaceholder.style.display = 'none';
 
         const st = sports.status || '';
+
+        const setSingleNyiRow = (message) => {
+            if (sportsRowAway) sportsRowAway.style.display = 'none';
+            if (sportsRowHome) {
+                sportsRowHome.style.display = 'flex';
+                sportsRowHome.className = 'sports-row sports-row--nyi';
+                sportsRowHome.innerHTML = '<span class="sports-row__team">Islanders</span><span class="sports-row__score">—</span>';
+            }
+            sportsStatus.textContent = message;
+        };
+
         if (st === 'error') {
-            sportsMatchup.textContent = 'New York Islanders';
-            sportsScore.textContent = '—';
-            sportsStatus.textContent = sports.status_text || 'Score unavailable';
+            setSingleNyiRow(sports.status_text || 'Score unavailable');
             return;
         }
         if (st === 'no_game') {
-            sportsMatchup.textContent = 'New York Islanders';
-            sportsScore.textContent = '—';
-            sportsStatus.textContent = sports.status_text || 'No game';
+            setSingleNyiRow(sports.status_text || 'No game');
             return;
         }
 
-        sportsMatchup.textContent = sports.matchup || 'NYI';
-        const a = sports.away_abbrev || '';
-        const h = sports.home_abbrev || '';
+        if (sportsRowAway) sportsRowAway.style.display = 'flex';
+        if (sportsRowHome) sportsRowHome.style.display = 'flex';
+
+        const a = sports.away_abbrev || '?';
+        const h = sports.home_abbrev || '?';
         const as = sports.away_score != null ? sports.away_score : 0;
         const hs = sports.home_score != null ? sports.home_score : 0;
-        sportsScore.textContent = `${a} ${as}  ·  ${hs} ${h}`;
+
+        sportsRowAway.className = 'sports-row' + (a === 'NYI' ? ' sports-row--nyi' : '');
+        sportsRowAway.innerHTML = `<span class="sports-row__team">${a}</span><span class="sports-row__score">${as}</span>`;
+
+        sportsRowHome.className = 'sports-row' + (h === 'NYI' ? ' sports-row--nyi' : '');
+        sportsRowHome.innerHTML = `<span class="sports-row__team">${h}</span><span class="sports-row__score">${hs}</span>`;
+
         sportsStatus.textContent = sports.status_text || '';
     }
 

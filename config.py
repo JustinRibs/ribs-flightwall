@@ -37,5 +37,12 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))  # Seconds between monitor
 FR24_POLL_INTERVAL = int(os.getenv("FR24_POLL_INTERVAL", "10"))  # CRITICAL: 10s for FlightRadar24 to avoid IP-block
 MONITOR_POLL_INTERVAL = int(os.getenv("MONITOR_POLL_INTERVAL", "60"))  # FlightAware (avoid high costs)
 ARRIVALS_POLL_INTERVAL = int(os.getenv("ARRIVALS_POLL_INTERVAL", "90"))  # Arrivals board (AeroAPI)
-SPORTS_POLL_INTERVAL = int(os.getenv("SPORTS_POLL_INTERVAL", "60"))  # NHL scoreboard (sports mode)
+SPORTS_POLL_INTERVAL = int(os.getenv("SPORTS_POLL_INTERVAL", "30"))  # API-Sports hockey; free tier ~100/day → use 900+ (15m) if needed
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5003")) # Use 5001 locally, override to 80 on Pi in .env
+
+# API-Sports / API-Football hockey (https://dashboard.api-football.com) — sports mode
+SPORTS_API_KEY = os.getenv("SPORTS_API") or os.getenv("sports_api") or ""
+SPORTS_HOCKEY_LEAGUE_ID = int(os.getenv("SPORTS_HOCKEY_LEAGUE_ID", "57"))  # NHL
+SPORTS_HOCKEY_TEAM_ID = os.getenv("SPORTS_HOCKEY_TEAM_ID", "").strip()  # optional; else resolved via search
+SPORTS_HOCKEY_SEASON = os.getenv("SPORTS_HOCKEY_SEASON", "").strip()  # optional e.g. 2025; else use league "current"
+SPORTS_HOCKEY_TEAM_SEARCH = os.getenv("SPORTS_HOCKEY_TEAM_SEARCH", "Islanders")

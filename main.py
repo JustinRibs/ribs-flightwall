@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -84,8 +85,19 @@ state_lock = threading.Lock()
 
 # Constants
 AEROAPI_URL = "https://aeroapi.flightaware.com/aeroapi"
-NHL_SCOREBOARD_URL = "https://api-web.nhle.com/v1/scoreboard/now"
-SPORTS_NHL_TEAM_ABBREV = "NYI"  # New York Islanders (sports mode)
+HOCKEY_API_BASE = "https://v1.hockey.api-sports.io"
+SPORTS_NHL_TEAM_ABBREV = "NYI"  # Matrix highlight / focus team (sports mode)
+
+# API-Sports NHL team id → 3-letter (no abbrev field on team objects)
+NHL_TEAM_ID_TO_ABBR = {
+    670: "ANA", 673: "BOS", 674: "BUF", 675: "CGY", 676: "CAR", 678: "CHI", 679: "COL",
+    680: "CBJ", 681: "DAL", 682: "DET", 683: "EDM", 684: "FLA", 685: "LAK", 687: "MIN",
+    688: "MTL", 689: "NSH", 690: "NJD", 691: "NYI", 692: "NYR", 693: "OTT", 695: "PHI",
+    696: "PIT", 697: "SJS", 698: "STL", 699: "TBL", 700: "TOR", 701: "VAN", 702: "VGK",
+    703: "WSH", 704: "WPG", 1436: "SEA", 2483: "UTA",
+}
+
+_hockey_team_id_cache: dict[tuple[int, int, str], int | None] = {}
 
 # Airline ICAO → website domain for logo.dev lookups
 AIRLINE_DOMAINS = {
@@ -657,35 +669,154 @@ def _empty_sports_payload(team: str, status: str, status_text: str) -> dict:
     }
 
 
-def _nhl_game_sort_key(game: dict) -> tuple:
-    """Sort: live first, then pregame, then future, then finished (newest id last)."""
-    s = (game.get("gameState") or "").upper()
-    if s == "LIVE":
-        tier = 0
-    elif s in ("PRE", "CRIT"):
-        tier = 1
-    elif s in ("FUT",):
-        tier = 2
-    elif s == "OFF":
-        tier = 3
-    else:
-        tier = 2
-    gid = game.get("id")
+_HOCKEY_FINAL_SHORT = frozenset({"FT", "AOT", "AP"})
+
+
+def _hockey_abbrev_for_team_id(team_id) -> str:
     try:
-        gid_i = int(gid) if gid is not None else 0
+        tid = int(team_id)
     except (TypeError, ValueError):
-        gid_i = 0
-    return (tier, -gid_i)
+        return "?"
+    return NHL_TEAM_ID_TO_ABBR.get(tid, "?")
 
 
-def _nhl_pregame_status_text(game: dict) -> str:
-    st = game.get("startTimeUTC") or ""
-    if not st:
+def _hockey_api_get(endpoint: str, params: dict) -> dict | None:
+    if not config.SPORTS_API_KEY:
+        return None
+    url = f"{HOCKEY_API_BASE.rstrip('/')}/{endpoint.lstrip('/')}"
+    try:
+        resp = requests.get(
+            url,
+            headers={"x-apisports-key": config.SPORTS_API_KEY},
+            params=params,
+            timeout=18,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logging.warning(f"Hockey API {endpoint} failed: {e}")
+        return None
+
+
+def _hockey_response_errors(data: dict | None) -> dict:
+    if not data:
+        return {"request": "no response"}
+    err = data.get("errors")
+    if isinstance(err, dict) and err:
+        return err
+    return {}
+
+
+def _hockey_errors_block_season(err: dict) -> bool:
+    blob = json.dumps(err).lower()
+    return "plan" in blob and "season" in blob
+
+
+def _hockey_league_current_season_year() -> int | None:
+    data = _hockey_api_get("leagues", {"id": config.SPORTS_HOCKEY_LEAGUE_ID})
+    if not data:
+        return None
+    for item in data.get("response") or []:
+        for sea in item.get("seasons") or []:
+            if sea.get("current"):
+                try:
+                    return int(sea["season"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+    return None
+
+
+def _hockey_season_candidates() -> list[int]:
+    if config.SPORTS_HOCKEY_SEASON:
+        try:
+            return [int(config.SPORTS_HOCKEY_SEASON)]
+        except ValueError:
+            pass
+    seen: set[int] = set()
+    out: list[int] = []
+    y = _hockey_league_current_season_year()
+    if y is not None:
+        seen.add(y)
+        out.append(y)
+    from datetime import datetime
+    cy = datetime.now().year
+    for fb in (cy, cy - 1, cy - 2, 2024, 2023):
+        if fb not in seen:
+            seen.add(fb)
+            out.append(fb)
+    return out
+
+
+def _hockey_resolve_team_id(season: int) -> int | None:
+    if config.SPORTS_HOCKEY_TEAM_ID:
+        try:
+            return int(config.SPORTS_HOCKEY_TEAM_ID)
+        except ValueError:
+            pass
+    cache_key = (config.SPORTS_HOCKEY_LEAGUE_ID, season, config.SPORTS_HOCKEY_TEAM_SEARCH)
+    if cache_key in _hockey_team_id_cache:
+        return _hockey_team_id_cache[cache_key]
+
+    data = _hockey_api_get(
+        "teams",
+        {
+            "league": config.SPORTS_HOCKEY_LEAGUE_ID,
+            "season": season,
+            "search": config.SPORTS_HOCKEY_TEAM_SEARCH,
+        },
+    )
+    tid = None
+    if data and not _hockey_response_errors(data):
+        rows = data.get("response") or []
+        if rows:
+            try:
+                tid = int(rows[0]["id"])
+            except (KeyError, TypeError, ValueError):
+                tid = None
+    _hockey_team_id_cache[cache_key] = tid
+    return tid
+
+
+def _hockey_game_involves_team(game: dict, team_id: int) -> bool:
+    t = game.get("teams") or {}
+    th = (t.get("home") or {}).get("id")
+    ta = (t.get("away") or {}).get("id")
+    return th == team_id or ta == team_id
+
+
+def _hockey_status_short(game: dict) -> str:
+    return ((game.get("status") or {}).get("short") or "").strip().upper()
+
+
+def _hockey_is_final(st: str) -> bool:
+    return st in _HOCKEY_FINAL_SHORT
+
+
+def _hockey_is_live(st: str) -> bool:
+    if not st or st in ("NS", "CANC"):
+        return False
+    return not _hockey_is_final(st)
+
+
+def _hockey_ts_et_date(ts) -> "datetime.date | None":
+    if not ts:
+        return None
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(ZoneInfo("America/New_York")).date()
+    except Exception:
+        return None
+
+
+def _hockey_pregame_status_text(game: dict) -> str:
+    raw = (game.get("date") or "").strip()
+    if not raw:
         return "NEXT"
     try:
         from datetime import datetime
         from zoneinfo import ZoneInfo
-        dt = datetime.fromisoformat(st.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         local = dt.astimezone(ZoneInfo("America/New_York"))
         h = local.hour % 12 or 12
         ampm = "PM" if local.hour >= 12 else "AM"
@@ -694,49 +825,83 @@ def _nhl_pregame_status_text(game: dict) -> str:
         return "NEXT"
 
 
-def _normalize_nhl_game(game: dict, team: str) -> dict:
-    away = game.get("awayTeam") or {}
-    home = game.get("homeTeam") or {}
-    aa = (away.get("abbrev") or "").strip().upper()
-    ha = (home.get("abbrev") or "").strip().upper()
+def _hockey_pick_game(games: list, team_id: int, today_et) -> dict | None:
+    """Prefer live, then today's result, then next NS, then most recent final."""
+    mine = [g for g in games if _hockey_game_involves_team(g, team_id)]
+    if not mine:
+        return None
+    now_ts = time.time()
+    live = [g for g in mine if _hockey_is_live(_hockey_status_short(g))]
+    if live:
+        return max(live, key=lambda g: int(g.get("timestamp") or 0))
+
+    finals_today = [
+        g for g in mine
+        if _hockey_is_final(_hockey_status_short(g)) and _hockey_ts_et_date(g.get("timestamp")) == today_et
+    ]
+    if finals_today:
+        return max(finals_today, key=lambda g: int(g.get("timestamp") or 0))
+
+    ns_future = [
+        g for g in mine
+        if _hockey_status_short(g) == "NS" and int(g.get("timestamp") or 0) >= now_ts - 300
+    ]
+    if ns_future:
+        return min(ns_future, key=lambda g: int(g.get("timestamp") or 0))
+
+    finals = [g for g in mine if _hockey_is_final(_hockey_status_short(g))]
+    if finals:
+        return max(finals, key=lambda g: int(g.get("timestamp") or 0))
+
+    return mine[-1]
+
+
+def _normalize_hockey_api_game(game: dict, focus_abbrev: str) -> dict:
+    t = game.get("teams") or {}
+    home = t.get("home") or {}
+    away = t.get("away") or {}
+    hid = home.get("id")
+    aid = away.get("id")
+    ha = _hockey_abbrev_for_team_id(hid)
+    aa = _hockey_abbrev_for_team_id(aid)
+
+    sc = game.get("scores") or {}
     try:
-        away_sc = int(away.get("score", 0))
-    except (TypeError, ValueError):
-        away_sc = 0
-    try:
-        home_sc = int(home.get("score", 0))
+        home_sc = int(sc.get("home", 0))
     except (TypeError, ValueError):
         home_sc = 0
+    try:
+        away_sc = int(sc.get("away", 0))
+    except (TypeError, ValueError):
+        away_sc = 0
 
-    matchup = f"{aa} @ {ha}" if aa and ha else team
+    matchup = f"{aa} @ {ha}" if aa and ha else focus_abbrev
+    st = _hockey_status_short(game)
+    long_s = ((game.get("status") or {}).get("long") or "").strip()
 
-    gs = (game.get("gameState") or "").upper()
-    if gs == "OFF":
+    if _hockey_is_final(st):
         status = "final"
-        status_text = "FINAL"
-    elif gs == "LIVE":
-        status = "live"
-        interm = game.get("intermissionInfo")
-        if interm:
-            status_text = "INT"
-        else:
-            pd = game.get("periodDescriptor") or {}
-            period = pd.get("number")
-            clk = game.get("clock") or {}
-            rem = (clk.get("timeRemaining") or "").strip()
-            if period and rem:
-                status_text = f"P{period} {rem}"
-            elif period:
-                status_text = f"P{period} LIVE"
-            else:
-                status_text = "LIVE"
-    else:
+        status_text = "FINAL" if st == "FT" else long_s.upper()[:10] if long_s else "FINAL"
+    elif st == "NS":
         status = "pregame"
-        status_text = _nhl_pregame_status_text(game)
+        status_text = _hockey_pregame_status_text(game)
+    elif _hockey_is_live(st):
+        status = "live"
+        timer = (game.get("timer") or "").strip()
+        if timer:
+            status_text = f"{st} {timer}"[:14]
+        else:
+            status_text = st if st else "LIVE"
+    elif st == "CANC":
+        status = "final"
+        status_text = "CANC"
+    else:
+        status = "live"
+        status_text = st or "LIVE"
 
     return {
         "status": status,
-        "team": team,
+        "team": focus_abbrev,
         "matchup": matchup,
         "away_abbrev": aa,
         "home_abbrev": ha,
@@ -748,32 +913,67 @@ def _normalize_nhl_game(game: dict, team: str) -> dict:
 
 def fetch_nhl_team_game(team_abbrev: str) -> dict:
     """
-    Fetch NHL scoreboard and return a normalized dict for the given team abbrev.
-    Always returns a dict (error / no_game use status field).
+    Fetch NHL game for the focus team via API-Sports hockey (API-Football dashboard key).
+    Same normalized dict shape as before for matrix + web UI.
     """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     team = (team_abbrev or "").strip().upper() or SPORTS_NHL_TEAM_ABBREV
 
-    try:
-        resp = requests.get(NHL_SCOREBOARD_URL, timeout=12)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logging.warning(f"NHL scoreboard fetch failed: {e}")
-        return _empty_sports_payload(team, "error", "Unavailable")
+    if not config.SPORTS_API_KEY:
+        logging.warning("SPORTS_API / sports_api not configured — sports mode needs API key")
+        return _empty_sports_payload(team, "error", "No API key")
 
-    candidates = []
-    for day in data.get("gamesByDate") or []:
-        for g in day.get("games") or []:
-            away = ((g.get("awayTeam") or {}).get("abbrev") or "").strip().upper()
-            home = ((g.get("homeTeam") or {}).get("abbrev") or "").strip().upper()
-            if away == team or home == team:
-                candidates.append(g)
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
 
-    if not candidates:
-        return _empty_sports_payload(team, "no_game", "No game")
+    for season in _hockey_season_candidates():
+        team_id = _hockey_resolve_team_id(season)
+        if team_id is None:
+            continue
 
-    candidates.sort(key=_nhl_game_sort_key)
-    return _normalize_nhl_game(candidates[0], team)
+        date_str = today_et.isoformat()
+        data = _hockey_api_get(
+            "games",
+            {"team": team_id, "season": season, "date": date_str},
+        )
+        err = _hockey_response_errors(data)
+        if _hockey_errors_block_season(err):
+            logging.info(f"Hockey API: season {season} not available on plan, trying next")
+            continue
+        if err and not data.get("response"):
+            logging.warning(f"Hockey API games error: {err}")
+            continue
+
+        games = data.get("response") or []
+        picked = _hockey_pick_game(games, team_id, today_et) if games else None
+
+        if not picked:
+            from datetime import timedelta
+            for delta in (-1, 1):
+                alt = (today_et + timedelta(days=delta)).isoformat()
+                data2 = _hockey_api_get(
+                    "games",
+                    {"team": team_id, "season": season, "date": alt},
+                )
+                if _hockey_response_errors(data2):
+                    continue
+                g2 = data2.get("response") or []
+                picked = _hockey_pick_game(g2, team_id, today_et)
+                if picked:
+                    break
+
+        if not picked:
+            bulk = _hockey_api_get("games", {"team": team_id, "season": season})
+            if _hockey_errors_block_season(_hockey_response_errors(bulk)):
+                continue
+            if bulk and bulk.get("response"):
+                picked = _hockey_pick_game(bulk["response"], team_id, today_et)
+
+        if picked:
+            return _normalize_hockey_api_game(picked, team)
+
+    return _empty_sports_payload(team, "no_game", "No game")
 
 
 def _format_alt_speed(alt, spd):
@@ -1048,35 +1248,79 @@ def _build_arrivals_image(arrivals: list, airport_code: str, current_time: float
     return image
 
 
+def _sports_text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    return int(draw.textlength(text, font=font))
+
+
+def _sports_draw_right(draw: ImageDraw.ImageDraw, x_right: int, y: int, text: str, font, fill: tuple):
+    w = _sports_text_width(draw, text, font)
+    draw.text((x_right - w, y), text, font=font, fill=fill)
+
+
+def _sports_center_text(draw: ImageDraw.ImageDraw, y: int, text: str, font, fill: tuple, width: int = 64):
+    if not text:
+        return
+    tw = _sports_text_width(draw, text, font)
+    draw.text((max(0, (width - tw) // 2), y), text, font=font, fill=fill)
+
+
 def _build_sports_image(sports_data: dict | None, current_time: float) -> Image.Image:
-    """64×32 Islanders / NHL score view for sports mode."""
-    image = Image.new("RGB", (64, 32), (0, 0, 0))
+    """64×32 Islanders scoreboard: navy field, orange accent, fixed rows (no scroll jitter)."""
+    # Islanders-adjacent palette (reads well on LED)
+    bg = (6, 28, 68)
+    accent = (255, 95, 0)
+    opp = (165, 185, 220)
+    white = (248, 252, 255)
+    muted = (88, 105, 140)
+
+    image = Image.new("RGB", (64, 32), bg)
     draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 64, 2), fill=accent)
+
+    def idle_screen(title: str, subtitle: str):
+        _sports_center_text(draw, 8, title, FONT_6X10, accent)
+        _sports_center_text(draw, 20, subtitle, FONT_5X8, muted)
 
     if not sports_data:
-        _draw_scrolling_text(image, "NYI", FONT_6X10, (255, 220, 0), 0, 2, 64, current_time)
-        draw.text((2, 16), "No data", font=FONT_5X8, fill=(120, 120, 120))
+        idle_screen("NYI", "No data")
         return image
 
     st = sports_data.get("status") or ""
     if st == "error":
-        _draw_scrolling_text(image, "NYI", FONT_6X10, (255, 220, 0), 0, 2, 64, current_time)
-        draw.text((2, 16), "Unavail", font=FONT_5X8, fill=(120, 120, 120))
+        idle_screen("NYI", "Offline")
         return image
     if st == "no_game":
-        _draw_scrolling_text(image, "ISLANDERS", FONT_5X8, (255, 220, 0), 0, 2, 64, current_time)
-        draw.text((4, 14), "No game", font=FONT_5X8, fill=(100, 100, 100))
+        idle_screen("ISLES", "No game")
         return image
 
-    matchup = (sports_data.get("matchup") or "NYI").strip()
-    ascore = sports_data.get("away_score", 0)
-    hscore = sports_data.get("home_score", 0)
-    score_line = f"{ascore} - {hscore}"
+    aa = (sports_data.get("away_abbrev") or "?")[:3].upper()
+    ha = (sports_data.get("home_abbrev") or "?")[:3].upper()
+    try:
+        ascore = int(sports_data.get("away_score", 0))
+    except (TypeError, ValueError):
+        ascore = 0
+    try:
+        hscore = int(sports_data.get("home_score", 0))
+    except (TypeError, ValueError):
+        hscore = 0
     status_text = (sports_data.get("status_text") or "").strip()
+    focus = SPORTS_NHL_TEAM_ABBREV
 
-    _draw_scrolling_text(image, matchup, FONT_5X8, (255, 220, 0), 0, 1, 64, current_time)
-    _draw_scrolling_text(image, score_line, FONT_5X8, (0, 220, 255), 0, 11, 64, current_time)
-    _draw_scrolling_text(image, status_text, FONT_5X8, (0, 220, 0), 0, 21, 64, current_time)
+    away_c = accent if aa == focus else opp
+    home_c = accent if ha == focus else opp
+
+    # Two bands: 6×10 scores (y 1–10 / 11–20), 5×8 abbr aligned mid-band
+    draw.text((4, 4), aa, font=FONT_5X8, fill=away_c)
+    _sports_draw_right(draw, 62, 1, str(ascore), FONT_6X10, white)
+
+    draw.text((4, 15), ha, font=FONT_5X8, fill=home_c)
+    _sports_draw_right(draw, 62, 11, str(hscore), FONT_6X10, white)
+
+    # Bottom: period / clock — scroll only if needed
+    if status_text and _sports_text_width(draw, status_text, FONT_5X8) > 60:
+        _draw_scrolling_text(image, status_text, FONT_5X8, (120, 255, 160), 0, 22, 64, current_time)
+    else:
+        _sports_center_text(draw, 22, status_text, FONT_5X8, (120, 255, 160))
     return image
 
 

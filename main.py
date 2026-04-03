@@ -71,9 +71,11 @@ def _load_matrix_brightness() -> int:
 
 # Global Application State
 app_state = {
-    "mode": "radius",       # "radius", "monitor", or "arrivals"
+    "mode": "radius",       # "radius", "monitor", "arrivals", or "text"
     "callsign": "",         # Target callsign for monitor mode
     "airport": "",          # Target airport IATA/ICAO for arrivals mode (e.g. JFK, KJFK)
+    "text_message": "",     # Message for text mode
+    "text_color": "#00FF00", # Hex color for text mode
     "current_flight": None, # Cache the latest flight data
     "current_arrivals": [], # List of arrivals for arrivals mode
     "last_seen_flight": None, # Last flight seen in radius mode (shown when nothing in range)
@@ -965,6 +967,44 @@ def _build_arrivals_image(arrivals: list, airport_code: str, current_time: float
     return image
 
 
+def _build_text_image(message: str, color_hex: str, current_time: float) -> Image.Image:
+    """
+    Build a 64x32 image showing the user's custom text, vertically centered.
+    Short text is centered; long text scrolls across the full width.
+    """
+    image = Image.new("RGB", (64, 32), (0, 0, 0))
+
+    if not message:
+        time_str = time.strftime("%I:%M %p").lstrip("0")
+        draw = ImageDraw.Draw(image)
+        temp_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        w = int(temp_draw.textlength(time_str, font=FONT_6X10))
+        x = max(0, (64 - w) // 2)
+        y = (32 - 10) // 2
+        draw.text((x, y), time_str, font=FONT_6X10, fill=(100, 100, 100))
+        return image
+
+    try:
+        h = color_hex.lstrip("#")
+        color = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        color = (0, 220, 0)
+
+    font = FONT_6X10
+    temp_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    text_w = int(temp_draw.textlength(message, font=font))
+    y = (32 - 10) // 2  # vertically centered for 10px-tall font
+
+    if text_w <= 64:
+        draw = ImageDraw.Draw(image)
+        x = (64 - text_w) // 2
+        draw.text((x, y), message, font=font, fill=color)
+    else:
+        _draw_scrolling_text(image, message, font, color, 0, y, 64, current_time)
+
+    return image
+
+
 DEBUG_IMAGE_PATH = os.path.join(tempfile.gettempdir(), "ribs-flight-monitor_debug_matrix.png")
 
 
@@ -991,6 +1031,8 @@ def led_daemon_loop():
                 current_mode = app_state["mode"]
                 target_callsign = app_state["callsign"].strip().upper()
                 target_airport = app_state["airport"].strip().upper()
+                text_message = app_state["text_message"]
+                text_color = app_state["text_color"]
 
             # 1. Fetch Data
             if current_mode == "radius":
@@ -1026,6 +1068,8 @@ def led_daemon_loop():
                 sleep_sec = config.FR24_POLL_INTERVAL
             elif current_mode == "monitor":
                 sleep_sec = config.MONITOR_POLL_INTERVAL
+            elif current_mode == "text":
+                sleep_sec = 5.0  # no API polling needed; just animate
             else:
                 sleep_sec = config.ARRIVALS_POLL_INTERVAL
 
@@ -1043,6 +1087,11 @@ def led_daemon_loop():
                             pass
                 if current_mode == "arrivals":
                     _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
+                elif current_mode == "text":
+                    with state_lock:
+                        text_message = app_state["text_message"]
+                        text_color = app_state["text_color"]
+                    _display_image(matrix, _build_text_image(text_message, text_color, current_time))
                 else:
                     _display_image(matrix, _build_flight_image(render_flight, current_time))
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
@@ -1064,6 +1113,8 @@ def get_state():
             "mode": app_state["mode"],
             "callsign": app_state["callsign"],
             "airport": app_state["airport"],
+            "text_message": app_state["text_message"],
+            "text_color": app_state["text_color"],
             "current_flight": app_state["current_flight"],
             "current_arrivals": app_state["current_arrivals"]
         })
@@ -1075,17 +1126,27 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
-            
+
         if "callsign" in data:
             app_state["callsign"] = str(data["callsign"]).upper()
             logging.info(f"Target callsign updated to {app_state['callsign']}")
-            
+
         if "airport" in data:
             app_state["airport"] = str(data["airport"]).upper().strip()
             logging.info(f"Target airport updated to {app_state['airport']}")
+
+        if "text_message" in data:
+            app_state["text_message"] = str(data["text_message"]).strip()
+            logging.info(f"Text message updated to: {app_state['text_message']}")
+
+        if "text_color" in data:
+            raw = str(data["text_color"]).strip()
+            if raw.startswith("#") and len(raw) in (4, 7):
+                app_state["text_color"] = raw
+                logging.info(f"Text color updated to {raw}")
             
     return jsonify({"status": "success"})
 

@@ -188,6 +188,21 @@ h2 {
     border-left-color: rgba(255, 255, 255, 0.25);
 }
 
+.mode-btn.locked {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--text-secondary);
+}
+
+.mode-btn.locked:hover {
+    color: var(--text-secondary);
+    background: transparent;
+}
+
+.mode-btn.locked.active {
+    background: #94a3b8;
+}
+
 /* Input Group */
 .input-group {
     display: flex;
@@ -302,6 +317,12 @@ input[type="text"]::placeholder {
     background-color: rgba(220, 38, 38, 0.08);
     color: var(--error);
     border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.status-message.warning {
+    background-color: rgba(234, 179, 8, 0.1);
+    color: #854d0e;
+    border: 1px solid rgba(234, 179, 8, 0.35);
 }
 
 /* Matrix Preview Card */
@@ -655,6 +676,70 @@ input[type="text"]::placeholder {
 .busiest-count {
     font-size: 14px;
     color: var(--text-secondary);
+}
+
+/* Text Mode input — override global uppercase */
+input.text-input-free {
+    text-transform: none;
+}
+
+/* Color row in Text Mode */
+.color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+}
+
+.color-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.color-swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.color-swatch.active {
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.color-swatch-custom {
+    overflow: hidden;
+}
+
+.color-swatch-custom input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
 }
 
 /* Mobile Adjustments */

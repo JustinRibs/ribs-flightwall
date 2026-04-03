@@ -34,8 +34,9 @@
                 
                 <div class="mode-selector">
                     <button type="button" class="mode-btn active" data-mode="radius" id="btn-radius">Radius</button>
-                    <button type="button" class="mode-btn" data-mode="monitor" id="btn-monitor">Monitor</button>
-                    <button type="button" class="mode-btn" data-mode="arrivals" id="btn-arrivals">Arrivals</button>
+                    <button type="button" class="mode-btn locked" data-mode="monitor" id="btn-monitor">Monitor 🔒</button>
+                    <button type="button" class="mode-btn locked" data-mode="arrivals" id="btn-arrivals">Arrivals 🔒</button>
+                    <button type="button" class="mode-btn" data-mode="text" id="btn-text">Text</button>
                 </div>
 
                 <p class="helper-text" id="mode-helper">
@@ -62,6 +63,32 @@
                 </div>
                 <p class="helper-text">
                     Enter an airport IATA (JFK, LAX) or ICAO (KJFK) code for arrivals board.
+                </p>
+            </div>
+
+            <div class="card text-card" id="text-section" style="display: none;">
+                <h2>Display Text</h2>
+                <div class="input-group">
+                    <input type="text" id="text-input" class="text-input-free" placeholder="Type anything…" autocomplete="off" spellcheck="false">
+                    <button id="text-btn" class="btn-primary">Display</button>
+                </div>
+                <div class="color-row">
+                    <span class="color-label">Color</span>
+                    <div class="color-swatches">
+                        <button type="button" class="color-swatch active" data-color="#00FF00" style="background:#00FF00" title="Green"></button>
+                        <button type="button" class="color-swatch" data-color="#FFDC00" style="background:#FFDC00" title="Yellow"></button>
+                        <button type="button" class="color-swatch" data-color="#00DCFF" style="background:#00DCFF" title="Cyan"></button>
+                        <button type="button" class="color-swatch" data-color="#FF3030" style="background:#FF3030" title="Red"></button>
+                        <button type="button" class="color-swatch" data-color="#FF00FF" style="background:#FF00FF" title="Magenta"></button>
+                        <button type="button" class="color-swatch" data-color="#FF8C00" style="background:#FF8C00" title="Orange"></button>
+                        <button type="button" class="color-swatch" data-color="#FFFFFF" style="background:#FFFFFF" title="White"></button>
+                        <button type="button" class="color-swatch color-swatch-custom" id="custom-color-swatch" data-color="#6464FF" style="background:#6464FF" title="Custom">
+                            <input type="color" id="text-color-picker" value="#6464FF" tabindex="-1">
+                        </button>
+                    </div>
+                </div>
+                <p class="helper-text">
+                    Text scrolls across the matrix if it's too long to fit. Short messages are centered.
                 </p>
             </div>
             

@@ -3,8 +3,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const modeHelper = document.getElementById('mode-helper');
     const callsignSection = document.getElementById('callsign-section');
     const airportSection = document.getElementById('airport-section');
+    const textSection = document.getElementById('text-section');
     const callsignInput = document.getElementById('callsign-input');
     const airportInput = document.getElementById('airport-input');
+    const textInput = document.getElementById('text-input');
+    const textBtn = document.getElementById('text-btn');
+    const textColorPicker = document.getElementById('text-color-picker');
     const updateBtn = document.getElementById('update-btn');
     const airportBtn = document.getElementById('airport-btn');
     const statusMessage = document.getElementById('status-message');
@@ -29,6 +33,11 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', async () => {
             const newMode = btn.dataset.mode;
             if (btn.classList.contains('active')) return;
+
+            if (btn.classList.contains('locked')) {
+                showStatus('💳 This feature requires a paid FlightAware API key', 'warning');
+                return;
+            }
 
             updateUIMode(newMode);
             try {
@@ -105,6 +114,63 @@ document.addEventListener('DOMContentLoaded', () => {
         airportInput.setSelectionRange(pos, pos);
     });
 
+    // Color Swatch Events
+    function getSelectedColor() {
+        const activeSwatch = document.querySelector('.color-swatch.active');
+        return activeSwatch ? activeSwatch.dataset.color : '#00FF00';
+    }
+
+    document.querySelectorAll('.color-swatch').forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+            swatch.classList.add('active');
+            // For non-custom swatches, programmatically open the picker if user clicked button itself
+            if (swatch.id === 'custom-color-swatch' && e.target !== textColorPicker) {
+                textColorPicker.click();
+            }
+        });
+    });
+
+    if (textColorPicker) {
+        textColorPicker.addEventListener('input', () => {
+            const customSwatch = document.getElementById('custom-color-swatch');
+            if (customSwatch) {
+                customSwatch.dataset.color = textColorPicker.value;
+                customSwatch.style.background = textColorPicker.value;
+                document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                customSwatch.classList.add('active');
+            }
+        });
+    }
+
+    // Text Display Events
+    textBtn.addEventListener('click', async () => {
+        const text = textInput.value.trim();
+        if (!text) {
+            showStatus('Please enter some text to display', 'error');
+            textInput.focus();
+            return;
+        }
+        const color = getSelectedColor();
+        const originalText = textBtn.textContent;
+        textBtn.textContent = 'Sending…';
+        textBtn.disabled = true;
+        try {
+            await updateServerState({ text_message: text, text_color: color });
+            showStatus(`Displaying on matrix`, 'success');
+        } catch (error) {
+            console.error('Failed to update text:', error);
+            showStatus('Failed to update display', 'error');
+        } finally {
+            textBtn.textContent = originalText;
+            textBtn.disabled = false;
+        }
+    });
+
+    textInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); textBtn.click(); }
+    });
+
     // Helper Functions
     async function fetchState() {
         try {
@@ -121,11 +187,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (state.callsign) callsignInput.value = state.callsign;
             if (state.airport) airportInput.value = state.airport;
+            if (state.text_message) textInput.value = state.text_message;
+            if (state.text_color) syncColorSwatch(state.text_color);
 
             if (state.mode === 'arrivals') {
                 updateArrivalsCard(state.current_arrivals, state.airport);
                 if (flightCard) flightCard.style.display = 'none';
                 if (arrivalsCard) arrivalsCard.style.display = 'block';
+            } else if (state.mode === 'text') {
+                if (flightCard) flightCard.style.display = 'none';
+                if (arrivalsCard) arrivalsCard.style.display = 'none';
             } else {
                 updateFlightCard(state.current_flight);
                 if (flightCard) flightCard.style.display = 'block';
@@ -208,23 +279,56 @@ document.addEventListener('DOMContentLoaded', () => {
         return await response.json();
     }
 
+    function isModeLocked(mode) {
+        const btn = document.querySelector(`.mode-btn[data-mode="${mode}"]`);
+        return btn && btn.classList.contains('locked');
+    }
+
     function updateUIMode(mode) {
+        if (isModeLocked(mode)) mode = 'radius';
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
 
         if (mode === 'monitor') {
             callsignSection.style.display = 'block';
             airportSection.style.display = 'none';
+            textSection.style.display = 'none';
             modeHelper.innerHTML = '<strong>Monitor Mode:</strong> Tracks a specific flight globally by its callsign.';
             if (window.innerWidth > 480) setTimeout(() => callsignInput.focus(), 50);
         } else if (mode === 'arrivals') {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'block';
+            textSection.style.display = 'none';
             modeHelper.innerHTML = '<strong>Arrivals Mode:</strong> Shows an airport arrivals board on the matrix. Enter an airport code (e.g. JFK).';
             if (window.innerWidth > 480) setTimeout(() => airportInput.focus(), 50);
+        } else if (mode === 'text') {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            textSection.style.display = 'block';
+            modeHelper.innerHTML = '<strong>Text Mode:</strong> Display any word or sentence on the matrix. Long text scrolls automatically.';
+            if (window.innerWidth > 480) setTimeout(() => textInput.focus(), 50);
         } else {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'none';
+            textSection.style.display = 'none';
             modeHelper.innerHTML = '<strong>Radius Mode:</strong> Scans the sky directly above your home for the closest flights.';
+        }
+    }
+
+    function syncColorSwatch(hexColor) {
+        const match = document.querySelector(`.color-swatch:not(#custom-color-swatch)[data-color="${hexColor.toUpperCase()}"]`)
+            || document.querySelector(`.color-swatch:not(#custom-color-swatch)[data-color="${hexColor.toLowerCase()}"]`);
+        if (match) {
+            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+            match.classList.add('active');
+        } else {
+            const customSwatch = document.getElementById('custom-color-swatch');
+            if (customSwatch) {
+                customSwatch.dataset.color = hexColor;
+                customSwatch.style.background = hexColor;
+                if (textColorPicker) textColorPicker.value = hexColor;
+                document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                customSwatch.classList.add('active');
+            }
         }
     }
 

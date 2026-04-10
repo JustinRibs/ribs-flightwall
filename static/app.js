@@ -19,7 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const fiRoute = document.getElementById('fi-route');
     const fiAlt = document.getElementById('fi-alt');
     const fiSpeed = document.getElementById('fi-speed');
+    const fiVs = document.getElementById('fi-vs');
+    const fiDistance = document.getElementById('fi-distance');
     const fiNoFlights = document.getElementById('fi-no-flights');
+    const fiLastSeen = document.getElementById('fi-last-seen');
     const arrivalsList = document.getElementById('arrivals-list');
     const arrivalsNone = document.getElementById('arrivals-none');
     const arrivalsAirport = document.getElementById('arrivals-airport');
@@ -198,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (flightCard) flightCard.style.display = 'none';
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
             } else {
-                updateFlightCard(state.current_flight);
+                updateFlightCard(state.current_flight, state);
                 if (flightCard) flightCard.style.display = 'block';
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
             }
@@ -208,7 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateFlightCard(flight) {
+    function updateFlightCard(flight, state) {
         if (!flightCard) return;
         flightCard.style.display = 'block';
 
@@ -219,11 +222,29 @@ document.addEventListener('DOMContentLoaded', () => {
             fiRoute.textContent = '';
             fiAlt.innerHTML = '';
             fiSpeed.innerHTML = '';
-            fiNoFlights.style.display = 'block';
+            fiVs.textContent = '';
+            fiDistance.textContent = '';
+            fiVs.className = 'fi-stat fi-vs';
+
+            // Show last-seen flight if available (radius mode)
+            const last = state && state.last_seen_flight;
+            const lastAt = state && state.last_seen_at;
+            if (last && lastAt) {
+                const minsAgo = Math.round((Date.now() / 1000 - lastAt) / 60);
+                const label = minsAgo < 1 ? 'just now' : `${minsAgo}m ago`;
+                fiNoFlights.style.display = 'none';
+                fiLastSeen.style.display = 'block';
+                fiLastSeen.textContent = `Last seen: ${last.callsign || ''}${last.route ? ' · ' + last.route : ''} — ${label}`;
+            } else {
+                fiNoFlights.style.display = 'block';
+                fiLastSeen.style.display = 'none';
+            }
             return;
         }
 
         fiNoFlights.style.display = 'none';
+        fiLastSeen.style.display = 'none';
+
         if (flight.airline_icao) {
             fiLogo.onload = () => { fiLogo.style.display = 'block'; };
             fiLogo.onerror = () => { fiLogo.style.display = 'none'; };
@@ -245,6 +266,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const spd = flight.speed || 0;
         const spdMph = Math.round(spd * 1.15078);
         fiSpeed.innerHTML = `Spd <strong>${spdMph} mph</strong>`;
+
+        const vs = flight.vertical_speed || 0;
+        if (vs > 200) {
+            fiVs.textContent = '↑ Climbing';
+            fiVs.className = 'fi-stat fi-vs fi-vs-up';
+        } else if (vs < -200) {
+            fiVs.textContent = '↓ Descending';
+            fiVs.className = 'fi-stat fi-vs fi-vs-down';
+        } else {
+            fiVs.textContent = '';
+            fiVs.className = 'fi-stat fi-vs';
+        }
+
+        const dist = flight.distance_km;
+        fiDistance.textContent = dist != null ? `${dist} km away` : '';
     }
 
     function updateArrivalsCard(arrivals, airport) {
@@ -306,6 +342,11 @@ document.addEventListener('DOMContentLoaded', () => {
             textSection.style.display = 'block';
             modeHelper.innerHTML = '<strong>Text Mode:</strong> Display any word or sentence on the matrix. Long text scrolls automatically.';
             if (window.innerWidth > 480) setTimeout(() => textInput.focus(), 50);
+        } else if (mode === 'blank') {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            textSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Off:</strong> Matrix display is blanked. Switch to another mode to resume.';
         } else {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'none';
@@ -336,12 +377,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function showStatus(message, type) {
         statusMessage.textContent = message;
         statusMessage.className = `status-message show ${type}`;
-        
+
         clearTimeout(statusTimeout);
-        statusTimeout = setTimeout(() => {
-            statusMessage.classList.remove('show');
-        }, 3000);
+        if (type === 'success') {
+            statusTimeout = setTimeout(() => {
+                statusMessage.classList.remove('show');
+            }, 3000);
+        }
+        // errors and warnings stay visible until clicked
     }
+
+    statusMessage.addEventListener('click', () => {
+        statusMessage.classList.remove('show');
+    });
 
     // Matrix Auto-Refresh logic
     const matrixPreview = document.getElementById('matrix-preview');

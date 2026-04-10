@@ -203,6 +203,20 @@ h2 {
     background: #94a3b8;
 }
 
+.mode-btn-off {
+    color: var(--text-secondary);
+}
+
+.mode-btn-off:hover {
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.mode-btn-off.active {
+    background: #374151;
+    color: white;
+}
+
 /* Input Group */
 .input-group {
     display: flex;
@@ -300,11 +314,18 @@ input[type="text"]::placeholder {
     transform: translateY(10px);
     transition: opacity 0.3s, transform 0.3s;
     pointer-events: none;
+    cursor: default;
 }
 
 .status-message.show {
     opacity: 1;
     transform: translateY(0);
+    pointer-events: auto;
+}
+
+.status-message.error,
+.status-message.warning {
+    cursor: pointer;
 }
 
 .status-message.success {
@@ -492,6 +513,27 @@ input[type="text"]::placeholder {
 
 .fi-stat strong {
     color: var(--text-primary);
+}
+
+.fi-vs-up {
+    color: #059669;
+    font-weight: 500;
+}
+
+.fi-vs-down {
+    color: #d97706;
+    font-weight: 500;
+}
+
+.fi-distance {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.fi-last-seen {
+    font-style: italic;
+    font-size: 13px;
+    margin-top: 4px;
 }
 
 /* Arrivals Board Card */

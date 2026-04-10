@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -79,6 +80,7 @@ app_state = {
     "current_flight": None, # Cache the latest flight data
     "current_arrivals": [], # List of arrivals for arrivals mode
     "last_seen_flight": None, # Last flight seen in radius mode (shown when nothing in range)
+    "last_seen_at": None,     # Timestamp when last_seen_flight was recorded
     "matrix_brightness": _load_matrix_brightness(),
 }
 state_lock = threading.Lock()
@@ -760,22 +762,30 @@ def _draw_arrow_prefix(image: Image.Image, x: int, y: int, arrow_up: bool, color
         draw.point((cx,     y + 5), fill=color)
 
 
-def _build_flight_image(flight_data, current_time: float) -> Image.Image:
+def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -> Image.Image:
     """Pixel-perfect 64x32 layout: logo left (0-16) | 4 lines text right (x=19+), FONT_5X8."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
 
     if not flight_data:
         time_str = time.strftime("%I:%M %p").lstrip("0")
-        
+
         temp_img = Image.new("RGB", (1, 1))
         temp_draw = ImageDraw.Draw(temp_img)
         w = temp_draw.textlength(time_str, font=FONT_6X10)
-        
+
         x = max(0, (64 - int(w)) // 2)
-        y = (32 - 10) // 2  # Approximate vertical center for 6x10 font
-        
-        draw.text((x, y), time_str, font=FONT_6X10, fill=(100, 100, 100))
+        draw.text((x, 4), time_str, font=FONT_6X10, fill=(100, 100, 100))
+
+        if mode_hint == "radius":
+            hint = "SCANNING"
+        elif mode_hint == "monitor":
+            hint = "WAITING"
+        else:
+            hint = ""
+        if hint:
+            hw = int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(hint, font=FONT_THUMB))
+            _draw_sharp(image, ((64 - hw) // 2, 24), hint, FONT_THUMB, (60, 60, 60))
         return image
 
     callsign      = (flight_data.get("callsign") or "").strip().upper()
@@ -1016,9 +1026,9 @@ def _display_image(matrix, image: Image.Image):
         image.save(DEBUG_IMAGE_PATH)
 
 
-def render_to_matrix(matrix, flight_data, current_time: float = 0.0):
+def render_to_matrix(matrix, flight_data, current_time: float = 0.0, mode_hint: str = ""):
     """Backward-compatible wrapper: build and display the flight image."""
-    _display_image(matrix, _build_flight_image(flight_data, current_time))
+    _display_image(matrix, _build_flight_image(flight_data, current_time, mode_hint=mode_hint))
 
 
 def led_daemon_loop():
@@ -1044,6 +1054,9 @@ def led_daemon_loop():
             elif current_mode == "arrivals" and target_airport:
                 arrivals_data = fetch_arrivals_data(target_airport)
                 flight_data = None
+            elif current_mode == "blank":
+                flight_data = None
+                arrivals_data = []
             else:
                 flight_data = None
                 arrivals_data = []
@@ -1053,6 +1066,7 @@ def led_daemon_loop():
                 app_state["current_arrivals"] = arrivals_data
                 if current_mode == "radius" and flight_data:
                     app_state["last_seen_flight"] = flight_data
+                    app_state["last_seen_at"] = time.time()
                     try:
                         db.record_flight(flight_data)
                     except Exception as e:
@@ -1070,6 +1084,8 @@ def led_daemon_loop():
                 sleep_sec = config.MONITOR_POLL_INTERVAL
             elif current_mode == "text":
                 sleep_sec = 5.0  # no API polling needed; just animate
+            elif current_mode == "blank":
+                sleep_sec = 5.0  # no API polling needed
             else:
                 sleep_sec = config.ARRIVALS_POLL_INTERVAL
 
@@ -1085,7 +1101,9 @@ def led_daemon_loop():
                             matrix.brightness = max(1, min(100, int(b)))
                         except (AttributeError, TypeError):
                             pass
-                if current_mode == "arrivals":
+                if current_mode == "blank":
+                    _display_image(matrix, Image.new("RGB", (64, 32), (0, 0, 0)))
+                elif current_mode == "arrivals":
                     _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
                 elif current_mode == "text":
                     with state_lock:
@@ -1093,7 +1111,7 @@ def led_daemon_loop():
                         text_color = app_state["text_color"]
                     _display_image(matrix, _build_text_image(text_message, text_color, current_time))
                 else:
-                    _display_image(matrix, _build_flight_image(render_flight, current_time))
+                    _display_image(matrix, _build_flight_image(render_flight, current_time, mode_hint=current_mode))
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
 
         except Exception as e:
@@ -1116,7 +1134,9 @@ def get_state():
             "text_message": app_state["text_message"],
             "text_color": app_state["text_color"],
             "current_flight": app_state["current_flight"],
-            "current_arrivals": app_state["current_arrivals"]
+            "current_arrivals": app_state["current_arrivals"],
+            "last_seen_flight": app_state["last_seen_flight"],
+            "last_seen_at": app_state["last_seen_at"],
         })
 
 @app.route('/api/state', methods=['POST'])
@@ -1126,7 +1146,7 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text", "blank"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
 
@@ -1144,7 +1164,7 @@ def update_state():
 
         if "text_color" in data:
             raw = str(data["text_color"]).strip()
-            if raw.startswith("#") and len(raw) in (4, 7):
+            if re.fullmatch(r'#[0-9A-Fa-f]{6}', raw):
                 app_state["text_color"] = raw
                 logging.info(f"Text color updated to {raw}")
             

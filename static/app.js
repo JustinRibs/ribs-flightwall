@@ -193,17 +193,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.text_message) textInput.value = state.text_message;
             if (state.text_color) syncColorSwatch(state.text_color);
 
+            const weatherSection = document.getElementById('weather-section');
             if (state.mode === 'arrivals') {
                 updateArrivalsCard(state.current_arrivals, state.airport);
                 if (flightCard) flightCard.style.display = 'none';
                 if (arrivalsCard) arrivalsCard.style.display = 'block';
+                if (weatherSection) weatherSection.style.display = 'none';
             } else if (state.mode === 'text') {
                 if (flightCard) flightCard.style.display = 'none';
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
+                if (weatherSection) weatherSection.style.display = 'none';
+            } else if (state.mode === 'weather') {
+                if (flightCard) flightCard.style.display = 'none';
+                if (arrivalsCard) arrivalsCard.style.display = 'none';
+                updateWeatherCard(state.current_weather);
+                if (weatherSection) weatherSection.style.display = 'block';
             } else {
                 updateFlightCard(state.current_flight, state);
                 if (flightCard) flightCard.style.display = 'block';
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
+                if (weatherSection) weatherSection.style.display = 'none';
             }
         } catch (error) {
             console.error('Error fetching state:', error);
@@ -305,6 +314,57 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
     }
 
+    function updateWeatherCard(weather) {
+        const weatherSection = document.getElementById('weather-section');
+        if (!weatherSection) return;
+
+        if (!weather) {
+            // Keep the card visible but show placeholder values while data loads
+            const tempEl = document.getElementById('weather-temp');
+            if (tempEl) tempEl.textContent = '—';
+            return;
+        }
+
+        const tempEl = document.getElementById('weather-temp');
+        const descEl = document.getElementById('weather-desc');
+        const feelsEl = document.getElementById('weather-feels');
+        const humidityEl = document.getElementById('weather-humidity');
+        const windEl = document.getElementById('weather-wind');
+        const cityEl = document.getElementById('weather-city');
+        const iconEl = document.getElementById('weather-icon');
+
+        if (iconEl && weather.icon_code) {
+            iconEl.src = `https://openweathermap.org/img/wn/${weather.icon_code}@2x.png`;
+            iconEl.alt = weather.description || '';
+            iconEl.style.display = 'block';
+        } else if (iconEl) {
+            iconEl.style.display = 'none';
+        }
+
+        if (tempEl) tempEl.textContent = `${weather.temp_f}°F`;
+        if (descEl) {
+            const d = weather.description || '';
+            descEl.textContent = d.charAt(0).toUpperCase() + d.slice(1);
+        }
+        if (feelsEl) feelsEl.textContent = `${weather.feels_f}°F`;
+        if (humidityEl) humidityEl.textContent = `${weather.humidity}%`;
+        if (cityEl) cityEl.textContent = weather.city || '';
+
+        const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+        const cardinal = dirs[Math.round((weather.wind_deg || 0) / 45) % 8];
+        if (windEl) windEl.textContent = `${cardinal} ${weather.wind_mph} mph`;
+
+        // Temperature-based color for the big number
+        const t = weather.temp_f;
+        let tempColor;
+        if (t <= 35) tempColor = '#60a5fa';
+        else if (t <= 55) tempColor = '#34d399';
+        else if (t <= 75) tempColor = '#fbbf24';
+        else if (t <= 90) tempColor = '#f97316';
+        else tempColor = '#ef4444';
+        if (tempEl) tempEl.style.color = tempColor;
+    }
+
     async function updateServerState(data) {
         const response = await fetch('/api/state', {
             method: 'POST',
@@ -347,6 +407,11 @@ document.addEventListener('DOMContentLoaded', () => {
             airportSection.style.display = 'none';
             textSection.style.display = 'none';
             modeHelper.innerHTML = '<strong>Off:</strong> Matrix display is blanked. Switch to another mode to resume.';
+        } else if (mode === 'weather') {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            textSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Weather Mode:</strong> Displays live weather conditions at your home location.';
         } else {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'none';

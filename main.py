@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import subprocess
@@ -79,6 +80,7 @@ app_state = {
     "text_color": "#00FF00", # Hex color for text mode
     "current_flight": None, # Cache the latest flight data
     "current_arrivals": [], # List of arrivals for arrivals mode
+    "current_weather": None, # Cache for weather mode
     "last_seen_flight": None, # Last flight seen in radius mode (shown when nothing in range)
     "last_seen_at": None,     # Timestamp when last_seen_flight was recorded
     "matrix_brightness": _load_matrix_brightness(),
@@ -393,6 +395,9 @@ arrivals_cache = {
     "time": 0
 }
 
+# Cache for weather data (OpenWeatherMap)
+weather_cache = {"data": None, "time": 0}
+
 def fetch_aeroapi_data(callsign):
     """
     Fetch flight position for a callsign via AeroAPI. The /flights/{ident} summary
@@ -579,6 +584,61 @@ def fetch_arrivals_data(airport_code: str):
     except requests.exceptions.RequestException as e:
         logging.error(f"AeroAPI Arrivals Error: {e}")
         return arrivals_cache["data"] if arrivals_cache["airport"] == airport else []
+
+
+def fetch_weather_data():
+    """
+    Fetch current weather from OpenWeatherMap using HOME_LAT/HOME_LON.
+    Returns a normalized dict or None. Caches for WEATHER_POLL_INTERVAL seconds.
+    On API error, returns stale cached data rather than None.
+    """
+    global weather_cache
+
+    now = time.time()
+    if weather_cache["data"] is not None and now - weather_cache["time"] < config.WEATHER_POLL_INTERVAL:
+        return weather_cache["data"]
+
+    if not config.OPENWEATHER_API_KEY:
+        logging.error("No OpenWeatherMap API key configured (OPENWEATHER_API_KEY)")
+        return weather_cache["data"]
+
+    url = "https://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "lat": config.HOME_LAT,
+        "lon": config.HOME_LON,
+        "appid": config.OPENWEATHER_API_KEY,
+        "units": "imperial",
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        raw = resp.json()
+
+        result = {
+            "temp_f": round(raw["main"]["temp"]),
+            "feels_f": round(raw["main"]["feels_like"]),
+            "humidity": raw["main"]["humidity"],
+            "wind_mph": round(raw["wind"]["speed"]),
+            "wind_deg": raw["wind"].get("deg", 0),
+            "condition": raw["weather"][0]["main"],
+            "description": raw["weather"][0]["description"],
+            "condition_id": raw["weather"][0]["id"],
+            "icon_code": raw["weather"][0]["icon"],
+            "city": raw.get("name", ""),
+            "is_day": raw["weather"][0]["icon"].endswith("d"),
+        }
+
+        weather_cache = {"data": result, "time": now}
+        logging.info(
+            f"Weather: {result['temp_f']}°F, {result['condition']} ({result['description']}), "
+            f"wind {result['wind_mph']}mph, humidity {result['humidity']}%"
+        )
+        return result
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"OpenWeatherMap Error: {e}")
+        return weather_cache["data"]
 
 
 def _is_valid_commercial(flight):
@@ -1015,6 +1075,182 @@ def _build_text_image(message: str, color_hex: str, current_time: float) -> Imag
     return image
 
 
+def _temp_color(temp_f: int, condition_id: int) -> tuple:
+    """Map temperature + condition code to a dominant LED RGB color."""
+    if temp_f <= 20:
+        base = (30, 100, 220)
+    elif temp_f <= 35:
+        base = (60, 160, 230)
+    elif temp_f <= 50:
+        base = (80, 200, 200)
+    elif temp_f <= 65:
+        base = (100, 220, 120)
+    elif temp_f <= 75:
+        base = (200, 230, 80)
+    elif temp_f <= 85:
+        base = (255, 200, 0)
+    elif temp_f <= 95:
+        base = (255, 140, 0)
+    else:
+        base = (255, 60, 0)
+
+    if 200 <= condition_id <= 232:   # Thunderstorm → magenta shift
+        return (min(255, base[0] + 60), max(0, base[1] - 60), min(255, base[2] + 80))
+    elif 300 <= condition_id <= 531:  # Rain/Drizzle → blue shift
+        return (max(0, base[0] - 40), max(0, base[1] - 20), min(255, base[2] + 60))
+    elif 600 <= condition_id <= 622:  # Snow → icy white-blue
+        return (160, 200, 255)
+    elif 700 <= condition_id <= 781:  # Fog/Haze/Mist → gray
+        return (140, 150, 160)
+    return base
+
+
+def _wind_cardinal(deg: int) -> str:
+    """Convert wind degrees to a 1-2 char cardinal direction string."""
+    dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    return dirs[int((deg + 22.5) / 45) % 8]
+
+
+def _draw_weather_icon(draw: ImageDraw.ImageDraw, ox: int, oy: int, condition_id: int, is_day: bool):
+    """
+    Draw a 10×10 pixel-art weather icon at image position (ox, oy).
+    Covers ox..ox+9, oy..oy+9.
+    """
+    SUN  = (255, 210,   0)
+    MOON = (180, 195, 215)
+    CLD  = (150, 155, 165)
+    RAIN = ( 70, 130, 220)
+    SNOW = (190, 215, 255)
+    BOLT = (255, 235,   0)
+
+    cx = ox + 4
+    cy = oy + 4
+
+    def sun():
+        draw.ellipse([cx-2, cy-2, cx+2, cy+2], fill=SUN)
+        for dx, dy in [(0,-4),(0,4),(-4,0),(4,0),(-3,-3),(3,-3),(-3,3),(3,3)]:
+            draw.point((cx+dx, cy+dy), fill=SUN)
+
+    def moon():
+        draw.ellipse([cx-3, cy-3, cx+3, cy+3], fill=MOON)
+        draw.ellipse([cx-1, cy-4, cx+4, cy+2], fill=(0, 0, 0))  # carve crescent
+
+    def cloud(x, y, color=CLD):
+        # Top center at (x, y); spans ~9px wide × 7px tall
+        draw.ellipse([x-4, y+2, x+0, y+6], fill=color)   # left lobe
+        draw.ellipse([x-2, y+0, x+2, y+4], fill=color)   # center bump
+        draw.ellipse([x+0, y+2, x+4, y+6], fill=color)   # right lobe
+        draw.rectangle([x-4, y+4, x+4, y+6], fill=color) # fill base
+
+    if 200 <= condition_id <= 232:          # Thunderstorm
+        cloud(cx, oy)
+        draw.line([(cx, oy+7), (cx-1, oy+8)], fill=BOLT)
+        draw.line([(cx-1, oy+8), (cx, oy+8)], fill=BOLT)
+        draw.line([(cx, oy+8), (cx-1, oy+9)], fill=BOLT)
+    elif 300 <= condition_id <= 531:        # Rain / Drizzle
+        cloud(cx, oy)
+        for dx in (-2, 0, 2):
+            draw.point((cx+dx,   oy+7), fill=RAIN)
+            draw.point((cx+dx+1, oy+8), fill=RAIN)
+    elif 600 <= condition_id <= 622:        # Snow
+        cloud(cx, oy)
+        for dx in (-2, 0, 2):
+            draw.point((cx+dx, oy+7), fill=SNOW)
+            draw.point((cx+dx, oy+9), fill=SNOW)
+    elif 700 <= condition_id <= 781:        # Fog / Mist / Haze
+        for dy in (1, 4, 7):
+            draw.line([(cx-4, oy+dy), (cx+4, oy+dy)], fill=CLD)
+    elif condition_id == 800:               # Clear sky
+        sun() if is_day else moon()
+    elif condition_id == 801:               # Few clouds (sun peeking)
+        if is_day:
+            draw.ellipse([cx-4, cy-4, cx-1, cy-1], fill=SUN)
+        cloud(cx+1, oy, color=(145, 150, 160))
+    else:                                   # 802-804 Cloudy / Overcast
+        cloud(cx-1, oy,   color=(120, 125, 135))
+        cloud(cx+1, oy+2, color=(95, 100, 110))
+
+
+def _build_weather_image(weather: dict, current_time: float) -> Image.Image:
+    """
+    Build a 64x32 weather display image.
+
+    Layout:
+      x=0-1 : animated breathing stripe (theme color, sine pulse)
+      y=1-10: temperature — FONT_6X10, centered, shimmering theme color
+      y=13-20: condition description — FONT_5X8, scrolling, lightened theme color
+      y=23-30: humidity (left, FONT_THUMB label + FONT_5X8 value)
+               wind (right-aligned, FONT_5X8, speed-coded color)
+    """
+    image = Image.new("RGB", (64, 32), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    if not weather:
+        time_str = time.strftime("%I:%M %p").lstrip("0")
+        w = int(draw.textlength(time_str, font=FONT_6X10))
+        draw.text(((64 - w) // 2, 11), time_str, font=FONT_6X10, fill=(100, 100, 100))
+        _draw_sharp(image, (18, 24), "WEATHER", FONT_THUMB, (50, 50, 50))
+        return image
+
+    temp_f = weather.get("temp_f", 0)
+    humidity = weather.get("humidity", 0)
+    wind_mph = weather.get("wind_mph", 0)
+    wind_deg = weather.get("wind_deg", 0)
+    condition_id = weather.get("condition_id", 800)
+    description = weather.get("description", "").title()
+    is_day = weather.get("is_day", True)
+
+    theme = _temp_color(temp_f, condition_id)
+
+    # Breathing side stripe (x=0-1, full height)
+    pulse = 0.45 + 0.25 * math.sin(2 * math.pi * current_time / 3.0)
+    stripe = (int(theme[0] * pulse), int(theme[1] * pulse), int(theme[2] * pulse))
+    for y in range(32):
+        draw.point((0, y), fill=stripe)
+        draw.point((1, y), fill=stripe)
+
+    # Weather icon: x=3-12, y=1-10
+    _draw_weather_icon(draw, 3, 1, condition_id, is_day)
+
+    # Row A: Temperature (y=1, FONT_6X10, animated shimmer) — centered in x=14-63 (50px)
+    shimmer = 0.88 + 0.12 * math.sin(2 * math.pi * current_time / 4.0)
+    temp_color = (
+        min(255, int(theme[0] * shimmer)),
+        min(255, int(theme[1] * shimmer)),
+        min(255, int(theme[2] * shimmer)),
+    )
+    temp_str = f"{temp_f}\u00b0"
+    temp_w = int(draw.textlength(temp_str, font=FONT_6X10))
+    temp_x = max(14, 14 + (50 - temp_w) // 2)
+    _draw_sharp(image, (temp_x, 1), temp_str, FONT_6X10, temp_color)
+
+    # Row B: Condition description (y=13, FONT_5X8, scrolling)
+    desc_color = (
+        min(255, int(theme[0] * 0.6 + 100)),
+        min(255, int(theme[1] * 0.6 + 100)),
+        min(255, int(theme[2] * 0.6 + 100)),
+    )
+    _draw_scrolling_text(image, description, FONT_5X8, desc_color, 3, 13, 61, current_time)
+
+    # Row C: Humidity (left) + Wind (right), y=23
+    _draw_sharp(image, (3, 23), f"{humidity}%", FONT_5X8, (0, 200, 220))
+
+    wind_dir = _wind_cardinal(wind_deg)
+    wind_str = f"{wind_dir} {wind_mph}m"
+    if wind_mph < 5:
+        wind_color = (120, 120, 80)
+    elif wind_mph < 15:
+        wind_color = (200, 180, 60)
+    elif wind_mph < 25:
+        wind_color = (240, 140, 40)
+    else:
+        wind_color = (255, 80, 80)
+    wind_w = int(draw.textlength(wind_str, font=FONT_5X8))
+    _draw_sharp(image, (63 - wind_w, 23), wind_str, FONT_5X8, wind_color)
+
+    return image
+
+
 DEBUG_IMAGE_PATH = os.path.join(tempfile.gettempdir(), "ribs-flight-monitor_debug_matrix.png")
 
 
@@ -1045,6 +1281,7 @@ def led_daemon_loop():
                 text_color = app_state["text_color"]
 
             # 1. Fetch Data
+            weather_data = None
             if current_mode == "radius":
                 flight_data = fetch_fr24_data()
                 arrivals_data = []
@@ -1057,6 +1294,10 @@ def led_daemon_loop():
             elif current_mode == "blank":
                 flight_data = None
                 arrivals_data = []
+            elif current_mode == "weather":
+                weather_data = fetch_weather_data()
+                flight_data = None
+                arrivals_data = []
             else:
                 flight_data = None
                 arrivals_data = []
@@ -1064,6 +1305,8 @@ def led_daemon_loop():
             with state_lock:
                 app_state["current_flight"] = flight_data
                 app_state["current_arrivals"] = arrivals_data
+                if current_mode == "weather":
+                    app_state["current_weather"] = weather_data
                 if current_mode == "radius" and flight_data:
                     app_state["last_seen_flight"] = flight_data
                     app_state["last_seen_at"] = time.time()
@@ -1076,6 +1319,7 @@ def led_daemon_loop():
                 )
                 render_arrivals = arrivals_data
                 render_airport = target_airport
+                render_weather = weather_data
 
             # 2. Display initial frame, then hold for poll interval, rebuilding on frame tick
             if current_mode == "radius":
@@ -1086,6 +1330,8 @@ def led_daemon_loop():
                 sleep_sec = 5.0  # no API polling needed; just animate
             elif current_mode == "blank":
                 sleep_sec = 5.0  # no API polling needed
+            elif current_mode == "weather":
+                sleep_sec = config.WEATHER_POLL_INTERVAL
             else:
                 sleep_sec = config.ARRIVALS_POLL_INTERVAL
 
@@ -1110,6 +1356,8 @@ def led_daemon_loop():
                         text_message = app_state["text_message"]
                         text_color = app_state["text_color"]
                     _display_image(matrix, _build_text_image(text_message, text_color, current_time))
+                elif current_mode == "weather":
+                    _display_image(matrix, _build_weather_image(render_weather, current_time))
                 else:
                     _display_image(matrix, _build_flight_image(render_flight, current_time, mode_hint=current_mode))
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
@@ -1135,6 +1383,7 @@ def get_state():
             "text_color": app_state["text_color"],
             "current_flight": app_state["current_flight"],
             "current_arrivals": app_state["current_arrivals"],
+            "current_weather": app_state["current_weather"],
             "last_seen_flight": app_state["last_seen_flight"],
             "last_seen_at": app_state["last_seen_at"],
         })
@@ -1146,7 +1395,7 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text", "blank"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text", "blank", "weather"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
 

@@ -37,6 +37,7 @@
                     <button type="button" class="mode-btn locked" data-mode="monitor" id="btn-monitor">Monitor 🔒</button>
                     <button type="button" class="mode-btn locked" data-mode="arrivals" id="btn-arrivals">Arrivals 🔒</button>
                     <button type="button" class="mode-btn" data-mode="text" id="btn-text">Text</button>
+                    <button type="button" class="mode-btn" data-mode="weather" id="btn-weather">Weather</button>
                     <button type="button" class="mode-btn mode-btn-off" data-mode="blank" id="btn-blank">Off</button>
                 </div>
 
@@ -93,6 +94,35 @@
                 </p>
             </div>
             
+            <div class="card weather-card" id="weather-section" style="display:none;">
+                <div class="weather-card-header">
+                    <h2>Current Weather</h2>
+                    <span id="weather-city" class="weather-city-badge"></span>
+                </div>
+                <div class="weather-main">
+                    <img id="weather-icon" class="weather-icon" src="" alt="" style="display:none;">
+                    <div class="weather-main-text">
+                        <span id="weather-temp" class="weather-temp"></span>
+                        <span id="weather-desc" class="weather-desc"></span>
+                    </div>
+                </div>
+                <div class="weather-details">
+                    <div class="weather-detail-item">
+                        <span class="weather-detail-label">Feels Like</span>
+                        <span id="weather-feels" class="weather-detail-value"></span>
+                    </div>
+                    <div class="weather-detail-item">
+                        <span class="weather-detail-label">Humidity</span>
+                        <span id="weather-humidity" class="weather-detail-value"></span>
+                    </div>
+                    <div class="weather-detail-item">
+                        <span class="weather-detail-label">Wind</span>
+                        <span id="weather-wind" class="weather-detail-value"></span>
+                    </div>
+                </div>
+                <p class="helper-text">Displaying live weather at your home location on the matrix.</p>
+            </div>
+
             <div id="status-message" class="status-message"></div>
 
             <div class="card flight-card" id="flight-card" style="display:none;">

@@ -784,6 +784,42 @@ input.text-input-free {
     padding: 0;
 }
 
+/* Mode selector wraps to 2 rows of 3 on narrow screens */
+@media (max-width: 560px) {
+    .mode-selector {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Reset flex-based left borders */
+    .mode-selector .mode-btn + .mode-btn {
+        border-left: none;
+    }
+
+    .mode-selector .mode-btn {
+        padding: 11px 6px;
+        font-size: 13px;
+        border-left: none;
+        border-top: none;
+    }
+
+    /* Re-add vertical separators for columns 2 and 3 */
+    .mode-selector .mode-btn:nth-child(3n+2),
+    .mode-selector .mode-btn:nth-child(3n) {
+        border-left: 1px solid var(--border);
+    }
+
+    /* Horizontal separator above second row */
+    .mode-selector .mode-btn:nth-child(n+4) {
+        border-top: 1px solid var(--border);
+    }
+
+    /* Keep active-adjacent border tint */
+    .mode-selector .mode-btn.active + .mode-btn {
+        border-left-color: rgba(255, 255, 255, 0.25);
+    }
+}
+
 /* Mobile Adjustments */
 @media (max-width: 480px) {
     .altitude-cards {

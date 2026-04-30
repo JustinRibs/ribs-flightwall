@@ -936,8 +936,9 @@ special_alert_state = {
 
 def _classify_special_flight(flight_data) -> str | None:
     """
-    Return a short human reason if the flight is "special", else None.
-    Reasons: "favorite", "military", "heavy", "rare-aircraft".
+    Return a short human reason if the flight is genuinely special, else None.
+    Reasons: "favorite", "vip", "military", "fighter", "warbird", "rare-aircraft".
+    Common widebodies (777/787/A350) are intentionally not flagged.
     """
     if not flight_data:
         return None
@@ -947,18 +948,26 @@ def _classify_special_flight(flight_data) -> str | None:
     if callsign and callsign in config.FAVORITE_CALLSIGNS:
         return "favorite"
 
+    # VIP callsigns beat everything else
+    if callsign:
+        for prefix in ("AF1", "AF2", "SAM"):
+            if callsign.startswith(prefix):
+                return "vip"
+
+    # Aircraft-type tags (fighter / warbird / rare) are more specific than a
+    # generic "military" callsign prefix, so they take priority.
+    if aircraft_code:
+        if aircraft_code in config.FIGHTER_AIRCRAFT_CODES:
+            return "fighter"
+        if aircraft_code in config.WARBIRD_AIRCRAFT_CODES:
+            return "warbird"
+        if aircraft_code in config.RARE_AIRCRAFT_CODES:
+            return "rare-aircraft"
+
     if callsign:
         for prefix in config.SPECIAL_CALLSIGN_PREFIXES:
             if prefix and callsign.startswith(prefix):
-                # Distinguish military vs presidential vs demo
-                if prefix in ("AF1", "AF2", "SAM", "EXEC"):
-                    return "vip"
                 return "military"
-
-    if aircraft_code and aircraft_code in config.SPECIAL_AIRCRAFT_CODES:
-        # Heavies are special-but-common; rare types get the "rare" tag
-        heavies = {"A388", "B748", "B744", "B77W", "B789", "B78X"}
-        return "heavy" if aircraft_code in heavies else "rare-aircraft"
 
     return None
 
@@ -1023,7 +1032,8 @@ def _build_alert_overlay(image: Image.Image, alert: dict, current_time: float) -
         "favorite":      (255,  60, 220),
         "vip":           (255, 220,   0),
         "military":      ( 60, 200,  80),
-        "heavy":         (255, 140,   0),
+        "fighter":       (255,  60,  60),
+        "warbird":       (200, 140,  60),
         "rare-aircraft": ( 80, 220, 255),
     }
     color = palette.get(reason, (255, 80, 80))
@@ -1064,13 +1074,14 @@ def _format_special_alert_for_discord(alert: dict) -> tuple[str, list]:
     callsign = f.get("callsign") or "?"
     reason = alert.get("reason", "")
     pretty_reason = {
-        "favorite":      "Favorite",
-        "vip":           "VIP",
-        "military":      "Military",
-        "heavy":         "Heavy",
-        "rare-aircraft": "Rare aircraft",
+        "favorite":      "⭐ Favorite",
+        "vip":           "🎩 VIP",
+        "military":      "🪖 Military",
+        "fighter":       "🛩️ Fighter jet",
+        "warbird":       "🏛️ Warbird",
+        "rare-aircraft": "✨ Rare aircraft",
     }.get(reason, reason)
-    title = f"✈️ Special flight overhead — {pretty_reason}"
+    title = f"Special flight overhead — {pretty_reason}"
     desc = f"**{callsign}**"
     aircraft = f.get("aircraft_model") or f.get("aircraft_code")
     if aircraft:

@@ -50,29 +50,79 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5003")) # Use 5001 locally, override to 80 on Pi in .env
 
 # --- Special-flight alerts ---------------------------------------------------
-# Heavies / rare aircraft that should always trigger an alert (ICAO type codes)
-SPECIAL_AIRCRAFT_CODES = {
-    "A388",  # A380
-    "B748",  # 747-8
-    "B744",  # 747-400
-    "A359", "A35K",  # A350
-    "B77W", "B77L", "B772", "B773", "B778", "B779",  # 777 family
-    "B789", "B788", "B78X",  # 787 family
-    "AN24", "AN26", "AN72", "AN12", "AN22", "AN124", "AN225",  # Antonovs
-    "C5", "C5M", "C17", "K35R", "K35E",  # Heavy military transports / tankers
-}
-# Extra type codes via env var (comma-separated)
-SPECIAL_AIRCRAFT_CODES.update(_split_csv(os.getenv("SPECIAL_AIRCRAFT_CODES", "")))
+# Categorized aircraft type codes (ICAO type designators). 777/787/A350 etc.
+# are deliberately NOT here — they fly overhead constantly and aren't rare.
 
-# Callsign prefixes that should always trigger an alert (3-letter operators or military patterns)
+# Active-duty military fighters / attack jets.
+FIGHTER_AIRCRAFT_CODES = {
+    "F14",                    # Tomcat (warbirds — civilian-operated)
+    "F15", "F15E",            # Eagle / Strike Eagle
+    "F16",                    # Fighting Falcon
+    "F18", "FA18", "F18S",    # Hornet / Super Hornet
+    "F22",                    # Raptor
+    "F35",                    # Lightning II
+    "A10",                    # Thunderbolt II
+    "AV8B",                   # Harrier
+    "EUFI",                   # Eurofighter Typhoon
+    "RFAL",                   # Rafale
+    "T38",                    # Talon trainer
+}
+
+# Bombers and strategic / surveillance / vintage warbirds.
+WARBIRD_AIRCRAFT_CODES = {
+    "B1",   "B2",  "B52",     # Lancer / Spirit / Stratofortress
+    "B17",  "B25", "B29",     # WWII bombers
+    "P51",  "P38", "P47",     # WWII fighters
+    "SPIT",                   # Spitfire
+    "DC3",  "DC4", "DC6",     # Vintage props
+    "CONC",                   # Concorde (😉 — for the env-overrides crowd)
+    "U2",   "SR71",           # Spy planes
+    "F117",                   # Nighthawk
+    "AT6",                    # T-6 Texan
+}
+
+# Genuinely rare / interesting heavies and military support aircraft.
+RARE_AIRCRAFT_CODES = {
+    "A388",                              # A380
+    "B748", "B744", "B742", "B743",      # 747 family (8/400/200/300)
+    "AN12", "AN22", "AN72",              # Antonov tactical transports
+    "AN124", "AN225",                    # Ruslan / Mriya
+    "C5",   "C5M",                       # C-5 Galaxy
+    "C17",                               # Globemaster III
+    "C130", "C30J",                      # Hercules
+    "K35R", "K35E", "KC10",              # Tankers
+    "E3CF", "E3TF",                      # AWACS
+    "E6",                                # Mercury
+    "P3",   "P8",                        # Maritime patrol
+    "V22",                               # Osprey
+}
+
+# Convenience set: anything in here is "special" by aircraft type alone.
+SPECIAL_AIRCRAFT_CODES = (
+    FIGHTER_AIRCRAFT_CODES
+    | WARBIRD_AIRCRAFT_CODES
+    | RARE_AIRCRAFT_CODES
+)
+# Extra type codes via env var (comma-separated) — get classified as "rare" by default.
+_extra = set(_split_csv(os.getenv("SPECIAL_AIRCRAFT_CODES", "")))
+RARE_AIRCRAFT_CODES = RARE_AIRCRAFT_CODES | _extra
+SPECIAL_AIRCRAFT_CODES = SPECIAL_AIRCRAFT_CODES | _extra
+
+# Callsign prefixes that should always trigger an alert. Military / VIP only —
+# generic / common civilian-collision-prone prefixes have been removed.
 SPECIAL_CALLSIGN_PREFIXES = {
-    "RCH",   # USAF Reach (Air Mobility Command)
-    "AF1", "AF2",  # Air Force One/Two
-    "SAM",   # Special Air Mission (POTUS/VPOTUS support)
-    "EXEC",  # Executive
-    "PAT",   # US Army priority air transport
+    "RCH",                            # USAF Reach (Air Mobility Command)
+    "AF1", "AF2",                     # Air Force One/Two
+    "SAM",                            # Special Air Mission (POTUS/VPOTUS support)
+    "PAT",                            # US Army priority air transport
     "NAVY", "ARMY", "USAF", "USCG", "MARINE",
-    "BLUE", "THUNDER",  # Demo teams
+    "BLUE",                           # Blue Angels (BLUE1..BLUE6)
+    "THUNDER",                        # Thunderbirds
+    "VADER",                          # USAF aggressors
+    "REACH",                          # alt for RCH
+    "DOOM",                           # B-1B nuclear standby
+    "SLAM",                           # F/A-18 demo
+    "VIPER",                          # F-16 demo
 }
 SPECIAL_CALLSIGN_PREFIXES.update(_split_csv(os.getenv("SPECIAL_CALLSIGN_PREFIXES", "")))
 

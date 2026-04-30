@@ -188,6 +188,35 @@ h2 {
     border-left-color: rgba(255, 255, 255, 0.25);
 }
 
+.mode-btn.locked {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--text-secondary);
+}
+
+.mode-btn.locked:hover {
+    color: var(--text-secondary);
+    background: transparent;
+}
+
+.mode-btn.locked.active {
+    background: #94a3b8;
+}
+
+.mode-btn-off {
+    color: var(--text-secondary);
+}
+
+.mode-btn-off:hover {
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.mode-btn-off.active {
+    background: #374151;
+    color: white;
+}
+
 /* Input Group */
 .input-group {
     display: flex;
@@ -285,11 +314,18 @@ input[type="text"]::placeholder {
     transform: translateY(10px);
     transition: opacity 0.3s, transform 0.3s;
     pointer-events: none;
+    cursor: default;
 }
 
 .status-message.show {
     opacity: 1;
     transform: translateY(0);
+    pointer-events: auto;
+}
+
+.status-message.error,
+.status-message.warning {
+    cursor: pointer;
 }
 
 .status-message.success {
@@ -302,6 +338,12 @@ input[type="text"]::placeholder {
     background-color: rgba(220, 38, 38, 0.08);
     color: var(--error);
     border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.status-message.warning {
+    background-color: rgba(234, 179, 8, 0.1);
+    color: #854d0e;
+    border: 1px solid rgba(234, 179, 8, 0.35);
 }
 
 /* Matrix Preview Card */
@@ -471,6 +513,27 @@ input[type="text"]::placeholder {
 
 .fi-stat strong {
     color: var(--text-primary);
+}
+
+.fi-vs-up {
+    color: #059669;
+    font-weight: 500;
+}
+
+.fi-vs-down {
+    color: #d97706;
+    font-weight: 500;
+}
+
+.fi-distance {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.fi-last-seen {
+    font-style: italic;
+    font-size: 13px;
+    margin-top: 4px;
 }
 
 /* Arrivals Board Card */
@@ -657,6 +720,106 @@ input[type="text"]::placeholder {
     color: var(--text-secondary);
 }
 
+/* Text Mode input — override global uppercase */
+input.text-input-free {
+    text-transform: none;
+}
+
+/* Color row in Text Mode */
+.color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+}
+
+.color-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.color-swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.color-swatch.active {
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.color-swatch-custom {
+    overflow: hidden;
+}
+
+.color-swatch-custom input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+}
+
+/* Mode selector wraps to 2 rows of 3 on narrow screens */
+@media (max-width: 560px) {
+    .mode-selector {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Reset flex-based left borders */
+    .mode-selector .mode-btn + .mode-btn {
+        border-left: none;
+    }
+
+    .mode-selector .mode-btn {
+        padding: 11px 6px;
+        font-size: 13px;
+        border-left: none;
+        border-top: none;
+    }
+
+    /* Re-add vertical separators for columns 2 and 3 */
+    .mode-selector .mode-btn:nth-child(3n+2),
+    .mode-selector .mode-btn:nth-child(3n) {
+        border-left: 1px solid var(--border);
+    }
+
+    /* Horizontal separator above second row */
+    .mode-selector .mode-btn:nth-child(n+4) {
+        border-top: 1px solid var(--border);
+    }
+
+    /* Keep active-adjacent border tint */
+    .mode-selector .mode-btn.active + .mode-btn {
+        border-left-color: rgba(255, 255, 255, 0.25);
+    }
+}
+
 /* Mobile Adjustments */
 @media (max-width: 480px) {
     .altitude-cards {
@@ -682,4 +845,360 @@ input[type="text"]::placeholder {
     .matrix-screen img {
         width: min(280px, calc(100vw - 84px));
     }
+}
+
+/* ─── Weather Card ─────────────────────────────────────────── */
+.weather-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.weather-card-header h2 {
+    margin-bottom: 0;
+}
+
+.weather-city-badge {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: #f1f5f9;
+    padding: 3px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.weather-main {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.weather-main-text {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.weather-icon {
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.10));
+    flex-shrink: 0;
+}
+
+.weather-temp {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    transition: color 0.5s ease;
+}
+
+.weather-desc {
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+}
+
+.weather-details {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.weather-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.weather-detail-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
+.weather-detail-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+@media (max-width: 480px) {
+    .weather-temp {
+        font-size: 40px;
+    }
+
+    .weather-details {
+        gap: 16px;
+    }
+}
+
+/* --- Stats: filters --- */
+.filter-card {
+    padding: 12px 16px;
+}
+.period-selector {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.period-btn {
+    flex: 1;
+    min-width: 60px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    background: #f8fafc;
+    color: var(--text-primary);
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.period-btn:hover {
+    background: #eef2f7;
+}
+.period-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+/* --- Stats: on-this-day tiles --- */
+.otd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+.otd-tile {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.otd-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+.otd-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.1;
+}
+.otd-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* --- Stats: calendar heatmap --- */
+.cal-heatmap {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-columns: 12px;
+    gap: 3px;
+    margin-top: 10px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+.cal-cell {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: #ebedf0;
+    display: inline-block;
+}
+.cal-empty { background: transparent; }
+.cal-l0 { background: #ebedf0; }
+.cal-l1 { background: #c6e8ff; }
+.cal-l2 { background: #6db8ff; }
+.cal-l3 { background: #2563eb; }
+.cal-l4 { background: #1d3a9c; }
+.cal-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.cal-legend .cal-cell {
+    width: 12px;
+    height: 12px;
+}
+
+/* --- Stats: hourly histogram --- */
+.hour-bars {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+    margin-top: 14px;
+    height: 70px;
+    align-items: end;
+}
+.hour-bar {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+}
+.hour-bar-fill {
+    width: 100%;
+    background: linear-gradient(180deg, var(--accent), #93c5fd);
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+}
+.hour-bar-label {
+    position: absolute;
+    bottom: -16px;
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+
+/* --- Special-flight alert banner (Control page) --- */
+.alert-card {
+    border: 1px solid #f59e0b;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04));
+    animation: alert-pulse 1.6s ease-in-out infinite;
+}
+@keyframes alert-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+.alert-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.alert-pulse {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #f59e0b;
+    box-shadow: 0 0 6px #f59e0b;
+    animation: alert-dot 1s ease-in-out infinite alternate;
+}
+@keyframes alert-dot {
+    from { opacity: 0.5; transform: scale(0.9); }
+    to   { opacity: 1.0; transform: scale(1.1); }
+}
+.alert-body {
+    margin-top: 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+/* --- Health page --- */
+.health-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+.health-row {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    background: #f8fafc;
+}
+.health-row-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+.health-row-stats {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.health-err {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--error);
+    word-break: break-word;
+}
+.health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #94a3b8;
+    display: inline-block;
+}
+.health-dot.ok {
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(5, 150, 105, 0.6);
+}
+.health-dot.warn { background: #f59e0b; }
+.health-dot.cold { background: #94a3b8; }
+
+/* --- Settings: env editor --- */
+.env-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+}
+.env-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.env-key {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.env-secret-tag {
+    font-size: 10px;
+    background: #fef3c7;
+    color: #92400e;
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-left: 4px;
+    text-transform: none;
+}
+.env-row input {
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: white;
+}
+.env-row input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.env-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
 }

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Health & status — API quotas, latencies, errors, DB size">
+    <title>Health | Ribs FlightWall</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <nav class="page-nav">
+                <a href="/">Control</a>
+                <a href="/stats">Stats</a>
+                <a href="/health" class="active">Health</a>
+                <a href="/settings">Settings</a>
+            </nav>
+            <div class="header-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+            </div>
+            <h1>System Health</h1>
+            <p class="header-subtitle">API quotas, latencies, errors, DB size</p>
+        </header>
+
+        <main>
+            <div class="card">
+                <h2>Overview</h2>
+                <div id="overview" class="otd-grid"></div>
+            </div>
+
+            <div class="card">
+                <h2>Data Sources</h2>
+                <div id="sources" class="health-list"></div>
+            </div>
+
+            <div class="card">
+                <h2>Configured Keys</h2>
+                <div id="keys" class="airline-list"></div>
+            </div>
+
+            <div class="card">
+                <h2>Active Alerts</h2>
+                <p class="helper-text">Special flights currently overhead.</p>
+                <div id="active-alerts" class="airline-list"></div>
+                <h3 style="margin-top:18px;">Recent Alerts</h3>
+                <div id="recent-alerts" class="airline-list"></div>
+            </div>
+        </main>
+
+        <footer class="page-footer">
+            <p>Ribs FlightWall</p>
+            <p><a href="/">Back to Control Panel</a></p>
+            <p class="footer-brand">Ribs Full Stack inc. ™</p>
+        </footer>
+    </div>
+
+    <script>
+        load();
+        setInterval(load, 5000);
+
+        async function load() {
+            try {
+                const [healthResp, alertsResp] = await Promise.all([
+                    fetch('/api/health'),
+                    fetch('/api/alerts'),
+                ]);
+                const health = await healthResp.json();
+                const alerts = await alertsResp.json();
+
+                renderOverview(health);
+                renderSources(health.sources || {}, health.aero_calls_today);
+                renderKeys(health.config_keys_set || {});
+                renderActiveAlerts(alerts.active || []);
+                renderRecentAlerts(alerts.recent || []);
+            } catch (e) {
+                console.error('health load failed', e);
+            }
+        }
+
+        function renderOverview(h) {
+            const tiles = [
+                tile('Mode',         h.mode || '—',                       ''),
+                tile('Uptime',       formatDuration(h.uptime_sec || 0),   ''),
+                tile('Hardware',     h.matrix_available ? 'Matrix' : 'Sim', h.fr24_available ? 'FR24 ok' : 'FR24 missing'),
+                tile('DB Size',      formatBytes(h.db_bytes || 0),        `${h.db_total_flights || 0} flights`),
+                tile('AeroAPI today', `${h.aero_calls_today || 0}`,        'calls'),
+                tile('Active alerts', `${h.active_alerts || 0}`,           ''),
+            ];
+            document.getElementById('overview').innerHTML = tiles.join('');
+        }
+
+        function renderSources(sources, aeroToday) {
+            const wrap = document.getElementById('sources');
+            const order = ['fr24', 'aero', 'weather', 'logodev'];
+            const labels = { fr24: 'FlightRadar24', aero: 'FlightAware AeroAPI', weather: 'OpenWeatherMap', logodev: 'logo.dev' };
+            wrap.innerHTML = order.map(k => {
+                const s = sources[k] || {};
+                const errorRate = s.calls > 0 ? Math.round((s.errors / s.calls) * 100) : 0;
+                const ok = s.last_ok_age_sec != null && s.last_ok_age_sec < 600;
+                const dot = `<span class="health-dot ${ok ? 'ok' : (s.calls ? 'warn' : 'cold')}"></span>`;
+                const ageStr = s.last_ok_age_sec != null ? `${formatDuration(s.last_ok_age_sec)} ago` : 'never';
+                const err = s.last_err ? `<div class="health-err">${escapeHtml(s.last_err)}</div>` : '';
+                return `
+                    <div class="health-row">
+                        <div class="health-row-head">${dot}<strong>${labels[k] || k}</strong></div>
+                        <div class="health-row-stats">
+                            <span>Calls: ${s.calls || 0}</span>
+                            <span>Errors: ${s.errors || 0} (${errorRate}%)</span>
+                            <span>Latency: ${s.last_latency_ms || 0} ms</span>
+                            <span>Last ok: ${ageStr}</span>
+                        </div>
+                        ${err}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderKeys(keys) {
+            const wrap = document.getElementById('keys');
+            wrap.innerHTML = Object.entries(keys).map(([k, v]) => `
+                <div class="airline-row">
+                    <span class="airline-name">${escapeHtml(k)}</span>
+                    <span class="airline-count" style="color:${v ? '#059669' : '#dc2626'}">${v ? 'set' : 'missing'}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderActiveAlerts(active) {
+            const wrap = document.getElementById('active-alerts');
+            if (!active.length) {
+                wrap.innerHTML = '<p class="helper-text">None right now.</p>';
+                return;
+            }
+            wrap.innerHTML = active.map(a => `
+                <div class="airline-row">
+                    <span class="airline-rank" style="background:#f59e0b">!</span>
+                    <span class="airline-name">${escapeHtml(a.callsign)} · ${escapeHtml(a.reason || '')}</span>
+                    <span class="airline-count">${escapeHtml((a.flight && a.flight.aircraft_code) || '')}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderRecentAlerts(recent) {
+            const wrap = document.getElementById('recent-alerts');
+            if (!recent.length) {
+                wrap.innerHTML = '<p class="helper-text">No alerts yet.</p>';
+                return;
+            }
+            wrap.innerHTML = recent.map((a, i) => `
+                <div class="airline-row">
+                    <span class="airline-rank">${i + 1}</span>
+                    <span class="airline-name">${escapeHtml(a.callsign)} · ${escapeHtml(a.reason)}</span>
+                    <span class="airline-count">${escapeHtml((a.seen_at || '').replace('T', ' ').slice(0, 16))}</span>
+                </div>
+            `).join('');
+        }
+
+        function tile(label, value, sub) {
+            return `
+                <div class="otd-tile">
+                    <span class="otd-label">${escapeHtml(label)}</span>
+                    <span class="otd-value">${escapeHtml(value)}</span>
+                    <span class="otd-sub">${escapeHtml(sub || '')}</span>
+                </div>
+            `;
+        }
+        function formatBytes(n) {
+            if (n < 1024) return `${n} B`;
+            if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+            if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+            return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        }
+        function formatDuration(sec) {
+            if (sec < 60) return `${sec}s`;
+            if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+            if (sec < 86400) return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+            return `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
+        }
+        function escapeHtml(s) { return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    </script>
+</body>
+</html>

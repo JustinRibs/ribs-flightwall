@@ -502,7 +502,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 favorite:        '⭐ Favorite Flight',
                 vip:             '🎩 VIP Flight',
                 military:        '🪖 Military Flight',
-                heavy:           '🛩️ Heavy Aircraft',
+                fighter:         '🛩️ Fighter Jet',
+                warbird:         '🏛️ Warbird',
                 'rare-aircraft': '✨ Rare Aircraft',
             })[a.reason] || '✈️ Special Flight';
             titleEl.textContent = reasonLabel;

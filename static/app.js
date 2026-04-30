@@ -31,6 +31,11 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchState();
     setInterval(fetchState, 10000);
 
+    // Poll alerts independently — a special flight overhead is the most exciting thing
+    // we can surface, so check more frequently than full state.
+    fetchAlerts();
+    setInterval(fetchAlerts, 6000);
+
     // Mode Button Events
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -208,6 +213,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (arrivalsCard) arrivalsCard.style.display = 'none';
                 updateWeatherCard(state.current_weather);
                 if (weatherSection) weatherSection.style.display = 'block';
+            } else if (state.mode === 'heatmap') {
+                // Heatmap mode also tracks flights; show them in the flight card
+                updateFlightCard(state.current_flight, state);
+                if (flightCard) flightCard.style.display = 'block';
+                if (arrivalsCard) arrivalsCard.style.display = 'none';
+                if (weatherSection) weatherSection.style.display = 'none';
             } else {
                 updateFlightCard(state.current_flight, state);
                 if (flightCard) flightCard.style.display = 'block';
@@ -412,6 +423,11 @@ document.addEventListener('DOMContentLoaded', () => {
             airportSection.style.display = 'none';
             textSection.style.display = 'none';
             modeHelper.innerHTML = '<strong>Weather Mode:</strong> Displays live weather conditions at your home location.';
+        } else if (mode === 'heatmap') {
+            callsignSection.style.display = 'none';
+            airportSection.style.display = 'none';
+            textSection.style.display = 'none';
+            modeHelper.innerHTML = '<strong>Heatmap Mode:</strong> 7-day density map of your airspace. X = hour of day, Y = altitude.';
         } else {
             callsignSection.style.display = 'none';
             airportSection.style.display = 'none';
@@ -464,6 +480,45 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSrc.searchParams.set('t', new Date().getTime());
             matrixPreview.src = currentSrc.toString();
         }, 2000); // refresh every 2 seconds
+    }
+
+    // Special-flight alerts banner
+    async function fetchAlerts() {
+        const card = document.getElementById('alert-card');
+        const titleEl = document.getElementById('alert-title');
+        const bodyEl = document.getElementById('alert-body');
+        if (!card || !titleEl || !bodyEl) return;
+        try {
+            const resp = await fetch('/api/alerts');
+            if (!resp.ok) throw new Error('alerts fetch failed');
+            const data = await resp.json();
+            const active = data.active || [];
+            if (!active.length) {
+                card.style.display = 'none';
+                return;
+            }
+            const a = active[0];
+            const reasonLabel = ({
+                favorite:        '⭐ Favorite Flight',
+                vip:             '🎩 VIP Flight',
+                military:        '🪖 Military Flight',
+                heavy:           '🛩️ Heavy Aircraft',
+                'rare-aircraft': '✨ Rare Aircraft',
+            })[a.reason] || '✈️ Special Flight';
+            titleEl.textContent = reasonLabel;
+            const f = a.flight || {};
+            const parts = [];
+            parts.push(`<strong>${escapeHtml(a.callsign || '')}</strong>`);
+            if (f.aircraft_model || f.aircraft_code) parts.push(escapeHtml(f.aircraft_model || f.aircraft_code));
+            if (f.route) parts.push(`<span style="opacity:.75">${escapeHtml(f.route)}</span>`);
+            bodyEl.innerHTML = parts.join(' · ');
+            card.style.display = 'block';
+        } catch (e) {
+            // silent
+        }
+    }
+    function escapeHtml(s) {
+        return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     // Test preset buttons (dev mode only)

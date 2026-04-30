@@ -350,13 +350,16 @@ def _fetch_logo_dev_bytes(icao_code: str) -> bytes | None:
     if not url:
         logodev_cache[icao_code] = None
         return None
+    t0 = time.time()
     try:
         resp = requests.get(url, timeout=5)
         resp.raise_for_status()
         logodev_cache[icao_code] = resp.content
+        _record_health("logodev", True, int((time.time() - t0) * 1000))
         logging.info(f"logo.dev: cached logo for {icao_code}")
         return resp.content
     except Exception as e:
+        _record_health("logodev", False, int((time.time() - t0) * 1000), str(e))
         logging.warning(f"logo.dev fetch failed for {icao_code}: {e}")
         logodev_cache[icao_code] = None
         return None
@@ -417,6 +420,7 @@ def fetch_aeroapi_data(callsign):
 
     headers = {"x-apikey": config.FLIGHTAWARE_API_KEY}
     callsign_upper = callsign.strip().upper()
+    t0 = time.time()
 
     try:
         # Step 1: Get flights for this ident (ident_type=designator forces callsign, not registration)
@@ -426,12 +430,14 @@ def fetch_aeroapi_data(callsign):
             params={"ident_type": "designator"},
             timeout=10
         )
+        _bump_aero_call_counter()
         list_resp.raise_for_status()
         list_data = list_resp.json()
         flights = list_data.get("flights", [])
 
         if not flights:
             aeroapi_cache = {"callsign": callsign_upper, "data": None, "time": now}
+            _record_health("aero", True, int((time.time() - t0) * 1000))
             logging.info(f"AeroAPI: No flights found for {callsign_upper}")
             return None
 
@@ -452,6 +458,7 @@ def fetch_aeroapi_data(callsign):
             # Step 3: Fetch position — only this endpoint returns last_position
             pos_url = f"{AEROAPI_URL}/flights/{fa_flight_id}/position"
             pos_resp = requests.get(pos_url, headers=headers, timeout=10)
+            _bump_aero_call_counter()
             pos_resp.raise_for_status()
             pos_data = pos_resp.json()
             pos = pos_data.get("last_position")
@@ -491,14 +498,17 @@ def fetch_aeroapi_data(callsign):
             }
 
             aeroapi_cache = {"callsign": callsign_upper, "data": result, "time": now}
+            _record_health("aero", True, int((time.time() - t0) * 1000))
             logging.info(f"AeroAPI: Found {result['callsign']} at {altitude}ft, {speed}kt ({orig_iata}-{dest_iata})")
             return result
 
         aeroapi_cache = {"callsign": callsign_upper, "data": None, "time": now}
+        _record_health("aero", True, int((time.time() - t0) * 1000))
         logging.info(f"AeroAPI: No active position for {callsign_upper} (flights may be scheduled/arrived)")
         return None
 
     except requests.exceptions.RequestException as e:
+        _record_health("aero", False, int((time.time() - t0) * 1000), str(e))
         logging.error(f"AeroAPI Request Error: {e}")
         return None
 
@@ -610,6 +620,7 @@ def fetch_weather_data():
         "units": "imperial",
     }
 
+    t0 = time.time()
     try:
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
@@ -630,6 +641,7 @@ def fetch_weather_data():
         }
 
         weather_cache = {"data": result, "time": now}
+        _record_health("weather", True, int((time.time() - t0) * 1000))
         logging.info(
             f"Weather: {result['temp_f']}°F, {result['condition']} ({result['description']}), "
             f"wind {result['wind_mph']}mph, humidity {result['humidity']}%"
@@ -637,6 +649,7 @@ def fetch_weather_data():
         return result
 
     except requests.exceptions.RequestException as e:
+        _record_health("weather", False, int((time.time() - t0) * 1000), str(e))
         logging.error(f"OpenWeatherMap Error: {e}")
         return weather_cache["data"]
 
@@ -658,6 +671,7 @@ def fetch_fr24_data():
         logging.error("FlightRadar24API not available")
         return None
 
+    t0 = time.time()
     try:
         # 10-mile radius around home (~16093m)
         bounds = fr_api.get_bounds_by_point(
@@ -676,6 +690,7 @@ def fetch_fr24_data():
             qualified.append(f)
 
         if not qualified:
+            _record_health("fr24", True, int((time.time() - t0) * 1000))
             return None
 
         # Pick closest to HOME (Entity.get_distance_from needs lat/lon attributes)
@@ -722,6 +737,7 @@ def fetch_fr24_data():
 
         airline_icao = (closest.airline_icao or "").strip().upper()[:3] if closest.airline_icao else ""
 
+        _record_health("fr24", True, int((time.time() - t0) * 1000))
         return {
             "callsign": (closest.callsign or "").strip().upper(),
             "altitude": int(alt),
@@ -741,6 +757,7 @@ def fetch_fr24_data():
         }
 
     except Exception as e:
+        _record_health("fr24", False, int((time.time() - t0) * 1000), str(e))
         logging.error(f"FlightRadar24 API Error: {e}")
         return None
 
@@ -820,6 +837,409 @@ def _draw_arrow_prefix(image: Image.Image, x: int, y: int, arrow_up: bool, color
         draw.point((cx,     y + 4), fill=color)
         draw.point((cx + 1, y + 4), fill=color)
         draw.point((cx,     y + 5), fill=color)
+
+
+def _build_heatmap_image(current_time: float) -> Image.Image:
+    """
+    64×32 LED heatmap of the last 7 days of flights.
+    Layout:
+      y=0..6:  thin header ("AIR HEAT 7D" + tiny pulse)
+      y=7..30: density grid (24 hour columns × 24 altitude bands → resampled to 60×24 area).
+              Top rows = high altitude, bottom rows = low altitude.
+      x=0..3:  reserved for altitude axis labels (faint).
+    Colors fade from cool (few) to hot (many).
+    """
+    image = Image.new("RGB", (64, 32), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    # Header
+    pulse = 0.55 + 0.45 * abs(math.sin(2 * math.pi * current_time / 4.0))
+    header_color = (int(80 * pulse), int(220 * pulse), int(255 * pulse))
+    _draw_sharp(image, (1, 0), "AIR HEAT 7D", FONT_THUMB, header_color)
+
+    try:
+        grid = db.get_heatmap_grid(width=60, height=24, days=7)
+    except Exception as e:
+        logging.warning(f"heatmap grid query failed: {e}")
+        _draw_sharp(image, (8, 14), "NO DATA", FONT_5X8, (120, 120, 120))
+        return image
+
+    # Find max for normalization
+    max_val = 0
+    for row in grid:
+        for v in row:
+            if v > max_val:
+                max_val = v
+
+    if max_val <= 0:
+        _draw_sharp(image, (8, 14), "NO DATA", FONT_5X8, (120, 120, 120))
+        # subtle axis ticks
+        for y in range(7, 31, 4):
+            draw.point((0, y), fill=(40, 40, 40))
+        return image
+
+    # Render grid into rows 7..30 (24 rows tall), columns 4..63 (60 wide)
+    grid_top = 7
+    grid_left = 4
+    for y, row in enumerate(grid):
+        for x, v in enumerate(row):
+            if v <= 0:
+                continue
+            ratio = v / max_val
+            # Cool→Hot palette: dark blue → cyan → yellow → red
+            if ratio < 0.25:
+                t = ratio / 0.25
+                color = (
+                    int(20 * (1 - t) + 0 * t),
+                    int(40 * (1 - t) + 180 * t),
+                    int(120 * (1 - t) + 255 * t),
+                )
+            elif ratio < 0.55:
+                t = (ratio - 0.25) / 0.30
+                color = (
+                    int(0 * (1 - t) + 255 * t),
+                    int(180 * (1 - t) + 220 * t),
+                    int(255 * (1 - t) + 60 * t),
+                )
+            elif ratio < 0.85:
+                t = (ratio - 0.55) / 0.30
+                color = (
+                    int(255 * (1 - t) + 255 * t),
+                    int(220 * (1 - t) + 120 * t),
+                    int(60 * (1 - t) + 0 * t),
+                )
+            else:
+                t = (ratio - 0.85) / 0.15
+                color = (
+                    255,
+                    int(120 * (1 - t) + 30 * t),
+                    int(0 * (1 - t) + 30 * t),
+                )
+            draw.point((grid_left + x, grid_top + y), fill=color)
+
+    # Faint altitude tick on left (y=7 high, y=30 low)
+    draw.point((0, grid_top), fill=(40, 80, 120))
+    draw.point((0, grid_top + 11), fill=(40, 80, 120))
+    draw.point((0, 30), fill=(40, 80, 120))
+
+    return image
+
+
+# --- Special-flight alerts --------------------------------------------------
+
+# Recently-alerted callsigns: callsign -> {"first": time, "until": time, "reason": str}
+special_alert_state = {
+    "active": {},     # currently flashing
+    "seen": {},       # debounce: callsign -> last alert timestamp
+}
+
+
+def _classify_special_flight(flight_data) -> str | None:
+    """
+    Return a short human reason if the flight is "special", else None.
+    Reasons: "favorite", "military", "heavy", "rare-aircraft".
+    """
+    if not flight_data:
+        return None
+    callsign = (flight_data.get("callsign") or "").strip().upper()
+    aircraft_code = (flight_data.get("aircraft_code") or "").strip().upper()
+
+    if callsign and callsign in config.FAVORITE_CALLSIGNS:
+        return "favorite"
+
+    if callsign:
+        for prefix in config.SPECIAL_CALLSIGN_PREFIXES:
+            if prefix and callsign.startswith(prefix):
+                # Distinguish military vs presidential vs demo
+                if prefix in ("AF1", "AF2", "SAM", "EXEC"):
+                    return "vip"
+                return "military"
+
+    if aircraft_code and aircraft_code in config.SPECIAL_AIRCRAFT_CODES:
+        # Heavies are special-but-common; rare types get the "rare" tag
+        heavies = {"A388", "B748", "B744", "B77W", "B789", "B78X"}
+        return "heavy" if aircraft_code in heavies else "rare-aircraft"
+
+    return None
+
+
+def _record_special_alert_once(flight_data, reason: str) -> bool:
+    """
+    Trigger an alert for this flight if we haven't recently. Returns True if newly triggered.
+    Debounced by callsign for 1 hour.
+    """
+    callsign = (flight_data.get("callsign") or "").strip().upper()
+    if not callsign:
+        return False
+
+    now = time.time()
+    last = special_alert_state["seen"].get(callsign, 0)
+    if now - last < 3600:
+        return False
+    special_alert_state["seen"][callsign] = now
+    special_alert_state["active"][callsign] = {
+        "first": now,
+        "until": now + max(2, config.SPECIAL_ALERT_DURATION),
+        "reason": reason,
+        "flight": dict(flight_data),
+    }
+    try:
+        db.record_special_alert(flight_data, reason)
+    except Exception as e:
+        logging.warning(f"DB special alert write failed: {e}")
+    return True
+
+
+def _purge_expired_alerts():
+    now = time.time()
+    expired = [k for k, v in special_alert_state["active"].items() if v.get("until", 0) <= now]
+    for k in expired:
+        special_alert_state["active"].pop(k, None)
+
+
+def _active_alert():
+    """Return the highest-priority currently-active alert dict, or None."""
+    _purge_expired_alerts()
+    if not special_alert_state["active"]:
+        return None
+    # Newest first
+    return max(
+        special_alert_state["active"].values(),
+        key=lambda a: a.get("first", 0),
+    )
+
+
+def _build_alert_overlay(image: Image.Image, alert: dict, current_time: float) -> Image.Image:
+    """Overlay a flashing border + 'SPECIAL' tag on top of the given matrix image."""
+    if not alert:
+        return image
+    # 2 Hz strobe
+    on = (int(current_time * 2)) % 2 == 0
+    if not on:
+        return image
+
+    reason = alert.get("reason", "")
+    palette = {
+        "favorite":      (255,  60, 220),
+        "vip":           (255, 220,   0),
+        "military":      ( 60, 200,  80),
+        "heavy":         (255, 140,   0),
+        "rare-aircraft": ( 80, 220, 255),
+    }
+    color = palette.get(reason, (255, 80, 80))
+
+    draw = ImageDraw.Draw(image)
+    # Border
+    draw.rectangle([0, 0, 63, 31], outline=color, width=1)
+    return image
+
+
+# --- Discord ---------------------------------------------------------------
+
+discord_state = {
+    "last_summary_day": "",  # ISO date of last daily summary post
+}
+
+
+def _discord_post(content: str, embeds: list | None = None) -> bool:
+    """Post a message to the configured Discord webhook. Returns True on success."""
+    if not config.DISCORD_WEBHOOK_URL:
+        return False
+    payload = {"content": content[:1900], "username": "Ribs FlightWall"}
+    if embeds:
+        payload["embeds"] = embeds
+    try:
+        resp = requests.post(config.DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+        if resp.status_code >= 400:
+            logging.warning(f"Discord webhook {resp.status_code}: {resp.text[:200]}")
+            return False
+        return True
+    except requests.RequestException as e:
+        logging.warning(f"Discord webhook failed: {e}")
+        return False
+
+
+def _format_special_alert_for_discord(alert: dict) -> tuple[str, list]:
+    f = alert.get("flight") or {}
+    callsign = f.get("callsign") or "?"
+    reason = alert.get("reason", "")
+    pretty_reason = {
+        "favorite":      "Favorite",
+        "vip":           "VIP",
+        "military":      "Military",
+        "heavy":         "Heavy",
+        "rare-aircraft": "Rare aircraft",
+    }.get(reason, reason)
+    title = f"✈️ Special flight overhead — {pretty_reason}"
+    desc = f"**{callsign}**"
+    aircraft = f.get("aircraft_model") or f.get("aircraft_code")
+    if aircraft:
+        desc += f" • {aircraft}"
+    if f.get("route"):
+        desc += f"\nRoute: `{f['route']}`"
+    if f.get("altitude") is not None:
+        alt = f["altitude"]
+        desc += f"\nAlt: {alt//1000}k ft" if alt >= 1000 else f"\nAlt: {alt} ft"
+    return title, [{"title": title, "description": desc, "color": 0x4CC2FF}]
+
+
+def _post_daily_summary_if_due():
+    """If we're past DISCORD_DAILY_SUMMARY_HOUR and haven't posted today, post and remember."""
+    if not (config.DISCORD_WEBHOOK_URL and config.DISCORD_DAILY_SUMMARY):
+        return
+    now = time.localtime()
+    today = time.strftime("%Y-%m-%d", now)
+    if discord_state["last_summary_day"] == today:
+        return
+    if now.tm_hour < config.DISCORD_DAILY_SUMMARY_HOUR:
+        return
+    try:
+        stats = db.get_stats(period="day")
+    except Exception as e:
+        logging.warning(f"daily summary: stats query failed: {e}")
+        return
+    total = stats.get("total_flights", 0)
+    top_airline = (stats.get("top_airlines") or [{}])[0]
+    top_aircraft = (stats.get("top_aircraft") or [{}])[0]
+    busiest = stats.get("busiest_hour")
+    high = stats.get("highest_flight") or {}
+    low = stats.get("lowest_flight") or {}
+
+    lines = [f"**Daily Airspace Summary — {today}**", f"✈️ {total} flights overhead today."]
+    if top_airline.get("airline_name"):
+        lines.append(f"• Most common airline: **{top_airline['airline_name']}** ({top_airline.get('count', 0)})")
+    if top_aircraft.get("aircraft_model"):
+        lines.append(f"• Most common aircraft: **{top_aircraft['aircraft_model']}** ({top_aircraft.get('count', 0)})")
+    if busiest is not None:
+        h12 = busiest % 12 or 12
+        ampm = "AM" if busiest < 12 else "PM"
+        lines.append(f"• Busiest hour: {h12}:00 {ampm} ({stats.get('busiest_count', 0)} flights)")
+    if low.get("altitude"):
+        lines.append(f"• Lowest: {low['callsign']} @ {low['altitude']} ft")
+    if high.get("altitude"):
+        lines.append(f"• Highest: {high['callsign']} @ {high['altitude']} ft")
+    if total == 0:
+        lines.append("(Quiet day — nothing recorded.)")
+
+    if _discord_post("\n".join(lines)):
+        discord_state["last_summary_day"] = today
+
+
+# --- Health metrics --------------------------------------------------------
+
+health_state = {
+    "fr24":    {"last_ok": 0.0, "last_err": "", "calls": 0, "errors": 0, "last_latency_ms": 0},
+    "aero":    {"last_ok": 0.0, "last_err": "", "calls": 0, "errors": 0, "last_latency_ms": 0},
+    "weather": {"last_ok": 0.0, "last_err": "", "calls": 0, "errors": 0, "last_latency_ms": 0},
+    "logodev": {"last_ok": 0.0, "last_err": "", "calls": 0, "errors": 0, "last_latency_ms": 0},
+    "started_at": time.time(),
+    "aero_calls_today": {"day": "", "count": 0},  # daily AeroAPI cost tracker
+}
+
+
+def _record_health(source: str, ok: bool, latency_ms: int = 0, err: str = ""):
+    s = health_state.get(source)
+    if s is None:
+        return
+    s["calls"] += 1
+    s["last_latency_ms"] = latency_ms
+    if ok:
+        s["last_ok"] = time.time()
+        s["last_err"] = ""
+    else:
+        s["errors"] += 1
+        s["last_err"] = (err or "")[:200]
+
+
+def _bump_aero_call_counter():
+    """AeroAPI is billed per request; track daily count for the health page."""
+    today = time.strftime("%Y-%m-%d")
+    s = health_state["aero_calls_today"]
+    if s["day"] != today:
+        s["day"] = today
+        s["count"] = 0
+    s["count"] += 1
+
+
+# --- .env editor ------------------------------------------------------------
+
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+# Whitelist of keys editable from the OTA settings page. NEVER expose API keys with credentials in raw form.
+ENV_EDITABLE_KEYS = [
+    "HOME_LAT",
+    "HOME_LON",
+    "MATRIX_BRIGHTNESS",
+    "FR24_POLL_INTERVAL",
+    "MONITOR_POLL_INTERVAL",
+    "ARRIVALS_POLL_INTERVAL",
+    "WEATHER_POLL_INTERVAL",
+    "FAVORITE_CALLSIGNS",
+    "SPECIAL_AIRCRAFT_CODES",
+    "SPECIAL_CALLSIGN_PREFIXES",
+    "SPECIAL_ALERT_DURATION",
+    "DISCORD_WEBHOOK_URL",
+    "DISCORD_DAILY_SUMMARY",
+    "DISCORD_DAILY_SUMMARY_HOUR",
+    "DISCORD_ALERT_SPECIAL",
+    "FLIGHTAWARE_API_KEY",
+    "OPENWEATHER_API_KEY",
+    "LOGO_DEV_TOKEN",
+]
+ENV_SECRET_KEYS = {"FLIGHTAWARE_API_KEY", "OPENWEATHER_API_KEY", "LOGO_DEV_TOKEN", "DISCORD_WEBHOOK_URL"}
+
+
+def _read_env_file() -> dict:
+    """Parse .env into {KEY: value}. Tolerant of comments / blank lines."""
+    out = {}
+    if not os.path.exists(ENV_PATH):
+        return out
+    try:
+        with open(ENV_PATH, "r") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                out[k] = v
+    except OSError as e:
+        logging.warning(f"read .env failed: {e}")
+    return out
+
+
+def _write_env_file(updates: dict) -> None:
+    """
+    Merge `updates` into .env, preserving comments and unknown keys. Only keys in
+    ENV_EDITABLE_KEYS are accepted; anything else is silently dropped.
+    """
+    safe = {k: ("" if v is None else str(v)) for k, v in updates.items() if k in ENV_EDITABLE_KEYS}
+    existing_lines = []
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH, "r") as f:
+            existing_lines = f.readlines()
+    seen = set()
+    new_lines = []
+    for raw in existing_lines:
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(line)
+            continue
+        k, _, _ = stripped.partition("=")
+        k = k.strip()
+        if k in safe:
+            new_lines.append(f"{k}={safe[k]}")
+            seen.add(k)
+        else:
+            new_lines.append(line)
+    for k, v in safe.items():
+        if k not in seen:
+            new_lines.append(f"{k}={v}")
+    with open(ENV_PATH, "w") as f:
+        f.write("\n".join(new_lines).rstrip() + "\n")
 
 
 def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -> Image.Image:
@@ -1298,6 +1718,10 @@ def led_daemon_loop():
                 weather_data = fetch_weather_data()
                 flight_data = None
                 arrivals_data = []
+            elif current_mode == "heatmap":
+                # Heatmap is purely DB-driven; still scan radius so logging / alerts keep working
+                flight_data = fetch_fr24_data()
+                arrivals_data = []
             else:
                 flight_data = None
                 arrivals_data = []
@@ -1307,13 +1731,25 @@ def led_daemon_loop():
                 app_state["current_arrivals"] = arrivals_data
                 if current_mode == "weather":
                     app_state["current_weather"] = weather_data
-                if current_mode == "radius" and flight_data:
+                if current_mode in ("radius", "heatmap") and flight_data:
                     app_state["last_seen_flight"] = flight_data
                     app_state["last_seen_at"] = time.time()
                     try:
                         db.record_flight(flight_data)
                     except Exception as e:
                         logging.warning(f"Failed to record flight to DB: {e}")
+                    # Special-flight detection
+                    reason = _classify_special_flight(flight_data)
+                    if reason and _record_special_alert_once(flight_data, reason):
+                        logging.info(f"SPECIAL ALERT [{reason}] {flight_data.get('callsign')}")
+                        if config.DISCORD_ALERT_SPECIAL:
+                            try:
+                                _, embeds = _format_special_alert_for_discord(
+                                    {"reason": reason, "flight": flight_data}
+                                )
+                                _discord_post("", embeds=embeds)
+                            except Exception as e:
+                                logging.warning(f"discord alert failed: {e}")
                 render_flight = flight_data if flight_data else (
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
@@ -1332,8 +1768,16 @@ def led_daemon_loop():
                 sleep_sec = 5.0  # no API polling needed
             elif current_mode == "weather":
                 sleep_sec = config.WEATHER_POLL_INTERVAL
+            elif current_mode == "heatmap":
+                sleep_sec = config.FR24_POLL_INTERVAL
             else:
                 sleep_sec = config.ARRIVALS_POLL_INTERVAL
+
+            # Daily Discord summary check
+            try:
+                _post_daily_summary_if_due()
+            except Exception as e:
+                logging.warning(f"daily summary check failed: {e}")
 
             poll_start = time.monotonic()
             while time.monotonic() - poll_start < sleep_sec:
@@ -1348,18 +1792,28 @@ def led_daemon_loop():
                         except (AttributeError, TypeError):
                             pass
                 if current_mode == "blank":
-                    _display_image(matrix, Image.new("RGB", (64, 32), (0, 0, 0)))
+                    frame = Image.new("RGB", (64, 32), (0, 0, 0))
                 elif current_mode == "arrivals":
-                    _display_image(matrix, _build_arrivals_image(render_arrivals, render_airport, current_time))
+                    frame = _build_arrivals_image(render_arrivals, render_airport, current_time)
                 elif current_mode == "text":
                     with state_lock:
                         text_message = app_state["text_message"]
                         text_color = app_state["text_color"]
-                    _display_image(matrix, _build_text_image(text_message, text_color, current_time))
+                    frame = _build_text_image(text_message, text_color, current_time)
                 elif current_mode == "weather":
-                    _display_image(matrix, _build_weather_image(render_weather, current_time))
+                    frame = _build_weather_image(render_weather, current_time)
+                elif current_mode == "heatmap":
+                    frame = _build_heatmap_image(current_time)
                 else:
-                    _display_image(matrix, _build_flight_image(render_flight, current_time, mode_hint=current_mode))
+                    frame = _build_flight_image(render_flight, current_time, mode_hint=current_mode)
+
+                # Special-flight alert overlay (any mode that shows a flight)
+                if current_mode in ("radius", "heatmap", "monitor"):
+                    alert = _active_alert()
+                    if alert:
+                        frame = _build_alert_overlay(frame, alert, current_time)
+
+                _display_image(matrix, frame)
                 time.sleep(0.05)  # ~20 FPS for smooth scrolling
 
         except Exception as e:
@@ -1395,7 +1849,7 @@ def update_state():
         return jsonify({"error": "Invalid JSON"}), 400
         
     with state_lock:
-        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text", "blank", "weather"]:
+        if "mode" in data and data["mode"] in ["radius", "monitor", "arrivals", "text", "blank", "weather", "heatmap"]:
             app_state["mode"] = data["mode"]
             logging.info(f"Mode switched to {app_state['mode']}")
 
@@ -1436,12 +1890,197 @@ def stats_page():
 
 @app.route('/api/stats')
 def api_stats():
-    """Return stats for the Stats page: top airlines, altitude extremes, busiest hour."""
+    """Return stats for the Stats page. Optional ?period=day|week|month|year|all."""
+    period = request.args.get("period", "week")
     try:
-        return jsonify(db.get_stats())
+        return jsonify(db.get_stats(period=period))
     except Exception as e:
         logging.error(f"Stats API error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calendar')
+def api_calendar():
+    """Daily flight counts for the heatmap calendar."""
+    try:
+        days = int(request.args.get("days", "90"))
+    except ValueError:
+        days = 90
+    try:
+        return jsonify({"days": db.get_calendar(days=days)})
+    except Exception as e:
+        logging.error(f"Calendar API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/on-this-day')
+def api_on_this_day():
+    try:
+        return jsonify(db.get_on_this_day())
+    except Exception as e:
+        logging.error(f"On-this-day API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/alerts')
+def api_alerts():
+    try:
+        recent = db.list_recent_alerts(limit=int(request.args.get("limit", "20")))
+    except Exception as e:
+        logging.error(f"Alerts API error: {e}")
+        return jsonify({"error": str(e)}), 500
+    _purge_expired_alerts()
+    active = []
+    for cs, a in special_alert_state["active"].items():
+        active.append({
+            "callsign": cs,
+            "reason": a.get("reason"),
+            "first": a.get("first"),
+            "until": a.get("until"),
+            "flight": a.get("flight", {}),
+        })
+    return jsonify({"active": active, "recent": recent})
+
+
+@app.route('/api/health')
+def api_health():
+    now = time.time()
+    sources = {}
+    for k in ("fr24", "aero", "weather", "logodev"):
+        s = health_state.get(k, {})
+        sources[k] = {
+            "calls": s.get("calls", 0),
+            "errors": s.get("errors", 0),
+            "last_latency_ms": s.get("last_latency_ms", 0),
+            "last_ok_age_sec": int(now - s["last_ok"]) if s.get("last_ok") else None,
+            "last_err": s.get("last_err", ""),
+        }
+
+    aero_today = health_state.get("aero_calls_today", {})
+    today = time.strftime("%Y-%m-%d")
+    aero_count_today = aero_today.get("count", 0) if aero_today.get("day") == today else 0
+
+    db_size = 0
+    db_count = 0
+    try:
+        db_size = db.get_db_size_bytes()
+        db_count = db.get_total_flight_count()
+    except Exception as e:
+        logging.warning(f"db health failed: {e}")
+
+    with state_lock:
+        cur_mode = app_state.get("mode")
+
+    return jsonify({
+        "uptime_sec": int(now - health_state.get("started_at", now)),
+        "mode": cur_mode,
+        "matrix_available": MATRIX_AVAILABLE,
+        "fr24_available": FR24_AVAILABLE,
+        "sources": sources,
+        "aero_calls_today": aero_count_today,
+        "db_bytes": db_size,
+        "db_total_flights": db_count,
+        "active_alerts": len(special_alert_state.get("active", {})),
+        "config_keys_set": {
+            "FLIGHTAWARE_API_KEY": bool(config.FLIGHTAWARE_API_KEY),
+            "OPENWEATHER_API_KEY": bool(config.OPENWEATHER_API_KEY),
+            "LOGO_DEV_TOKEN": bool(config.LOGO_DEV_TOKEN),
+            "DISCORD_WEBHOOK_URL": bool(config.DISCORD_WEBHOOK_URL),
+            "HOME_SET": (config.HOME_LAT != 0.0 or config.HOME_LON != 0.0),
+        },
+    })
+
+
+@app.route('/health')
+def health_page():
+    return render_template('health.html', matrix_available=MATRIX_AVAILABLE)
+
+
+@app.route('/api/env', methods=['GET'])
+def api_env_get():
+    """Return current values for editable env keys. Secrets are returned masked."""
+    raw = _read_env_file()
+    out = []
+    for k in ENV_EDITABLE_KEYS:
+        v = raw.get(k, "")
+        masked = bool(v) and k in ENV_SECRET_KEYS
+        out.append({
+            "key": k,
+            "value": "" if masked else v,
+            "is_secret": k in ENV_SECRET_KEYS,
+            "is_set": bool(v),
+        })
+    return jsonify({"vars": out, "path": ENV_PATH})
+
+
+@app.route('/api/env', methods=['POST'])
+def api_env_post():
+    data = request.json or {}
+    updates = data.get("updates") or {}
+    if not isinstance(updates, dict):
+        return jsonify({"error": "updates must be an object"}), 400
+
+    safe = {}
+    for k, v in updates.items():
+        if k not in ENV_EDITABLE_KEYS:
+            continue
+        # For secrets, treat empty string as "leave unchanged" so masked GETs round-trip safely
+        if k in ENV_SECRET_KEYS and (v is None or str(v).strip() == ""):
+            continue
+        safe[k] = "" if v is None else str(v)
+
+    if not safe:
+        return jsonify({"ok": True, "updated": [], "note": "Nothing to update."})
+
+    # Preserve unchanged secrets by reading their current values back in
+    if any(k in ENV_SECRET_KEYS for k in ENV_EDITABLE_KEYS):
+        existing = _read_env_file()
+        for k in ENV_EDITABLE_KEYS:
+            if k in ENV_SECRET_KEYS and k not in safe and k in existing:
+                safe[k] = existing[k]
+
+    try:
+        _write_env_file(safe)
+    except OSError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    restart = bool(data.get("restart"))
+    if restart:
+        _schedule_restart()
+    return jsonify({
+        "ok": True,
+        "updated": [k for k in updates.keys() if k in ENV_EDITABLE_KEYS],
+        "restarting": restart,
+    })
+
+
+@app.route('/api/discord/test', methods=['POST'])
+def api_discord_test():
+    if not config.DISCORD_WEBHOOK_URL:
+        return jsonify({"ok": False, "error": "No DISCORD_WEBHOOK_URL configured"}), 400
+    ok = _discord_post("👋 Ribs FlightWall test ping — webhook is wired up.")
+    return jsonify({"ok": ok})
+
+
+@app.route('/api/discord/summary', methods=['POST'])
+def api_discord_summary():
+    """Force-post the daily summary now (ignores time-of-day gate)."""
+    discord_state["last_summary_day"] = ""  # reset gate so the helper actually runs
+    # Temporarily allow ignoring hour by faking the localtime check
+    try:
+        stats = db.get_stats(period="day")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    total = stats.get("total_flights", 0)
+    msg = [f"**Manual Airspace Summary**", f"✈️ {total} flights overhead today."]
+    top_airline = (stats.get("top_airlines") or [{}])[0]
+    if top_airline.get("airline_name"):
+        msg.append(f"• Top airline: **{top_airline['airline_name']}** ({top_airline.get('count', 0)})")
+    top_aircraft = (stats.get("top_aircraft") or [{}])[0]
+    if top_aircraft.get("aircraft_model"):
+        msg.append(f"• Top aircraft: **{top_aircraft['aircraft_model']}** ({top_aircraft.get('count', 0)})")
+    ok = _discord_post("\n".join(msg))
+    return jsonify({"ok": ok})
 
 
 @app.route('/debug/matrix.png')

@@ -17,6 +17,7 @@
             <nav class="page-nav">
                 <a href="/">Control</a>
                 <a href="/stats">Stats</a>
+                <a href="/health">Health</a>
                 <a href="/settings" class="active">Settings</a>
             </nav>
             <div class="header-icon">
@@ -45,13 +46,38 @@
             {% endif %}
 
             <div class="card">
-                <h2>Update & Restart</h2>
+                <h2>Configuration (.env)</h2>
+                <p class="helper-text">
+                    Edit configuration values without SSH. Secret keys are masked — leave them blank to keep the existing value.
+                </p>
+                <form id="env-form" class="env-form"></form>
+                <div class="env-actions">
+                    <button type="button" id="env-save" class="btn-primary">Save</button>
+                    <button type="button" id="env-save-restart" class="btn-primary">Save &amp; Restart</button>
+                </div>
+                <div id="env-result" class="status-message" style="margin-top: 14px; text-align: left;"></div>
+            </div>
+
+            <div class="card">
+                <h2>Discord</h2>
+                <p class="helper-text">
+                    If a webhook URL is set above, you can send a test ping or force a daily airspace summary right now.
+                </p>
+                <div class="env-actions">
+                    <button type="button" id="discord-test" class="btn-primary">Send Test Ping</button>
+                    <button type="button" id="discord-summary" class="btn-primary">Post Summary Now</button>
+                </div>
+                <div id="discord-result" class="status-message" style="margin-top: 14px; text-align: left;"></div>
+            </div>
+
+            <div class="card">
+                <h2>Update &amp; Restart</h2>
                 <p class="helper-text">
                     Pull the latest code from the remote repository and restart the flightwall service.
                     The page may briefly disconnect while the service restarts.
                 </p>
                 <button type="button" id="update-restart-btn" class="btn-primary">
-                    Update & Restart
+                    Update &amp; Restart
                 </button>
                 <div id="update-result" class="status-message update-result" style="margin-top: 1rem; text-align: left; white-space: pre-wrap;"></div>
             </div>
@@ -95,6 +121,83 @@
         })();
         {% endif %}
 
+        // ---- .env editor ----
+        (async function loadEnv() {
+            const form = document.getElementById('env-form');
+            try {
+                const resp = await fetch('/api/env');
+                const data = await resp.json();
+                form.innerHTML = (data.vars || []).map(v => {
+                    const placeholder = v.is_secret
+                        ? (v.is_set ? '••••••••  (leave blank to keep)' : 'Not set')
+                        : '';
+                    const type = v.is_secret ? 'password' : 'text';
+                    return `
+                        <label class="env-row">
+                            <span class="env-key">${v.key}${v.is_secret ? ' <span class="env-secret-tag">secret</span>' : ''}</span>
+                            <input type="${type}" name="${v.key}" value="${v.is_secret ? '' : escAttr(v.value || '')}" placeholder="${escAttr(placeholder)}" autocomplete="off" spellcheck="false">
+                        </label>
+                    `;
+                }).join('');
+            } catch (e) {
+                form.innerHTML = '<p class="helper-text">Could not load .env values.</p>';
+            }
+        })();
+
+        async function saveEnv(restart) {
+            const form = document.getElementById('env-form');
+            const result = document.getElementById('env-result');
+            const updates = {};
+            form.querySelectorAll('input[name]').forEach(inp => {
+                updates[inp.name] = inp.value;
+            });
+            result.textContent = restart ? 'Saving and restarting…' : 'Saving…';
+            result.className = 'status-message show';
+            try {
+                const resp = await fetch('/api/env', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ updates, restart })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    result.textContent = restart ? 'Saved. Service is restarting…' : `Saved. (${data.updated.length} keys)`;
+                    result.className = 'status-message show success';
+                } else {
+                    result.textContent = data.error || 'Save failed';
+                    result.className = 'status-message show error';
+                }
+            } catch (e) {
+                result.textContent = 'Request failed.';
+                result.className = 'status-message show error';
+            }
+        }
+        document.getElementById('env-save').addEventListener('click', () => saveEnv(false));
+        document.getElementById('env-save-restart').addEventListener('click', () => saveEnv(true));
+
+        // ---- Discord helpers ----
+        async function discordCall(path) {
+            const result = document.getElementById('discord-result');
+            result.textContent = 'Sending…';
+            result.className = 'status-message show';
+            try {
+                const resp = await fetch(path, { method: 'POST' });
+                const data = await resp.json();
+                if (data.ok) {
+                    result.textContent = 'Sent.';
+                    result.className = 'status-message show success';
+                } else {
+                    result.textContent = data.error || 'Failed.';
+                    result.className = 'status-message show error';
+                }
+            } catch (e) {
+                result.textContent = 'Request failed.';
+                result.className = 'status-message show error';
+            }
+        }
+        document.getElementById('discord-test').addEventListener('click', () => discordCall('/api/discord/test'));
+        document.getElementById('discord-summary').addEventListener('click', () => discordCall('/api/discord/summary'));
+
         document.getElementById('update-restart-btn').addEventListener('click', async function () {
             const btn = this;
             const resultEl = document.getElementById('update-result');
@@ -123,6 +226,8 @@
                 btn.disabled = false;
             }
         });
+
+        function escAttr(s) { return (s || '').toString().replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
     </script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="description" content="Flight stats over your home — Most common airlines, altitude records, busiest hours.">
+    <meta name="description" content="Flight stats over your home — Most common airlines, aircraft, routes, altitude records, busiest hours.">
     <title>Stats | Ribs FlightWall</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -17,6 +17,7 @@
             <nav class="page-nav">
                 <a href="/">Control</a>
                 <a href="/stats" class="active">Stats</a>
+                <a href="/health">Health</a>
                 <a href="/settings">Settings</a>
             </nav>
             <div class="header-icon">
@@ -28,23 +29,66 @@
                 </svg>
             </div>
             <h1>Your Airspace Stats</h1>
-            <p class="header-subtitle">Last 7 days — Flights over your house</p>
+            <p class="header-subtitle" id="period-subtitle">Last 7 days</p>
         </header>
 
         <main>
+            <div class="card filter-card">
+                <div class="period-selector" role="tablist">
+                    <button type="button" class="period-btn" data-period="day">Day</button>
+                    <button type="button" class="period-btn active" data-period="week">Week</button>
+                    <button type="button" class="period-btn" data-period="month">Month</button>
+                    <button type="button" class="period-btn" data-period="year">Year</button>
+                    <button type="button" class="period-btn" data-period="all">All</button>
+                </div>
+            </div>
+
             <div id="stats-loading" class="card">
                 <p class="helper-text">Loading stats…</p>
             </div>
+
             <div id="stats-content" style="display: none;">
                 <div class="card stats-summary">
-                    <h2>This Week</h2>
+                    <h2>Total</h2>
                     <p id="total-flights" class="stats-total"></p>
+                </div>
+
+                <div class="card">
+                    <h2>On This Day</h2>
+                    <div id="on-this-day" class="otd-grid"></div>
+                </div>
+
+                <div class="card">
+                    <h2>Activity Calendar</h2>
+                    <p class="helper-text">Last 90 days — darker = busier sky.</p>
+                    <div id="calendar-heatmap" class="cal-heatmap"></div>
+                    <div class="cal-legend">
+                        <span>Less</span>
+                        <span class="cal-cell cal-l0"></span>
+                        <span class="cal-cell cal-l1"></span>
+                        <span class="cal-cell cal-l2"></span>
+                        <span class="cal-cell cal-l3"></span>
+                        <span class="cal-cell cal-l4"></span>
+                        <span>More</span>
+                    </div>
                 </div>
 
                 <div class="card">
                     <h2>Most Common Airlines</h2>
                     <p class="helper-text">Airlines seen most often in your airspace</p>
                     <div id="top-airlines" class="airline-list"></div>
+                </div>
+
+                <div class="card">
+                    <h2>Top Aircraft</h2>
+                    <p class="helper-text">Aircraft models passing overhead</p>
+                    <div id="top-aircraft" class="airline-list"></div>
+                </div>
+
+                <div class="card">
+                    <h2>Top Routes</h2>
+                    <p class="helper-text">Most common origin → destination pairs</p>
+                    <div id="top-routes" class="airline-list"></div>
                 </div>
 
                 <div class="card">
@@ -67,8 +111,10 @@
                     <h2>Busiest Hour</h2>
                     <p class="helper-text">Time of day with the most flights overhead</p>
                     <div id="busiest-hour" class="busiest-hour"></div>
+                    <div id="hour-bars" class="hour-bars"></div>
                 </div>
             </div>
+
             <div id="stats-empty" class="card" style="display: none;">
                 <h2>No Data Yet</h2>
                 <p class="helper-text">Run in <strong>Radius mode</strong> and leave it running for a while. Flights that pass over your home will be recorded automatically.</p>
@@ -83,9 +129,35 @@
     </div>
 
     <script>
-        (async function() {
+        const PERIOD_LABEL = {
+            day:   'Last 24 hours',
+            week:  'Last 7 days',
+            month: 'Last 30 days',
+            year:  'Last year',
+            all:   'All time',
+        };
+
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadStats(btn.dataset.period);
+            });
+        });
+
+        // Initial load
+        loadStats('week');
+        loadCalendar();
+        loadOnThisDay();
+
+        async function loadStats(period) {
+            document.getElementById('stats-loading').style.display = 'block';
+            document.getElementById('stats-content').style.display = 'none';
+            document.getElementById('stats-empty').style.display = 'none';
+            document.getElementById('period-subtitle').textContent = PERIOD_LABEL[period] || '';
+
             try {
-                const resp = await fetch('/api/stats');
+                const resp = await fetch('/api/stats?period=' + encodeURIComponent(period));
                 const data = await resp.json();
                 document.getElementById('stats-loading').style.display = 'none';
 
@@ -95,54 +167,34 @@
                     return;
                 }
 
-                const total = data.total_flights_week || 0;
-                if (total === 0 && !data.top_airlines?.length) {
+                const total = data.total_flights || 0;
+                if (total === 0 && !(data.top_airlines || []).length) {
                     document.getElementById('stats-empty').style.display = 'block';
                     return;
                 }
 
                 document.getElementById('stats-content').style.display = 'block';
-
-                // Total flights
                 document.getElementById('total-flights').textContent =
                     total === 1 ? '1 flight recorded' : `${total} flights recorded`;
 
-                // Top airlines
-                const list = document.getElementById('top-airlines');
-                const airlines = data.top_airlines || [];
-                if (airlines.length) {
-                    list.innerHTML = airlines.map((a, i) => `
-                        <div class="airline-row">
-                            <span class="airline-rank">${i + 1}</span>
-                            <span class="airline-name">${escapeHtml(a.airline_name || a.airline_icao)}</span>
-                            <span class="airline-count">${a.count}</span>
-                        </div>
-                    `).join('');
-                } else {
-                    list.innerHTML = '<p class="helper-text">No airline data yet.</p>';
-                }
+                renderList('top-airlines', (data.top_airlines || []).map(a => ({
+                    name: a.airline_name || a.airline_icao,
+                    count: a.count,
+                })));
 
-                // Lowest flight
-                const low = data.lowest_flight;
-                if (low) {
-                    document.getElementById('lowest-alt').textContent = formatAlt(low.altitude);
-                    document.getElementById('lowest-details').textContent =
-                        `${low.callsign || ''} ${low.route || ''}`.trim() || '—';
-                } else {
-                    document.getElementById('lowest-card').innerHTML =
-                        '<span class="alt-label">Lowest</span><span class="helper-text">No data</span>';
-                }
+                renderList('top-aircraft', (data.top_aircraft || []).map(a => ({
+                    name: a.aircraft_model || a.aircraft_code,
+                    count: a.count,
+                })));
 
-                // Highest flight
-                const high = data.highest_flight;
-                if (high) {
-                    document.getElementById('highest-alt').textContent = formatAlt(high.altitude);
-                    document.getElementById('highest-details').textContent =
-                        `${high.callsign || ''} ${high.route || ''}`.trim() || '—';
-                } else {
-                    document.getElementById('highest-card').innerHTML =
-                        '<span class="alt-label">Highest</span><span class="helper-text">No data</span>';
-                }
+                renderList('top-routes', (data.top_routes || []).map(r => ({
+                    name: `${r.origin} → ${r.dest}`,
+                    count: r.count,
+                })));
+
+                // Lowest / highest
+                renderAlt('lowest', data.lowest_flight);
+                renderAlt('highest', data.highest_flight);
 
                 // Busiest hour
                 const hour = data.busiest_hour;
@@ -158,19 +210,134 @@
                     document.getElementById('busiest-hour').innerHTML =
                         '<span class="helper-text">No data</span>';
                 }
+
+                renderHourBars(data.hourly_histogram || []);
             } catch (e) {
                 document.getElementById('stats-loading').style.display = 'none';
                 document.getElementById('stats-empty').style.display = 'block';
                 document.querySelector('#stats-empty .helper-text').textContent =
                     'Could not load stats. Make sure the tracker is running.';
             }
-        })();
+        }
+
+        function renderList(id, items) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (!items.length) {
+                el.innerHTML = '<p class="helper-text">No data yet.</p>';
+                return;
+            }
+            el.innerHTML = items.map((a, i) => `
+                <div class="airline-row">
+                    <span class="airline-rank">${i + 1}</span>
+                    <span class="airline-name">${escapeHtml(a.name || '?')}</span>
+                    <span class="airline-count">${a.count}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderAlt(kind, row) {
+            const card = document.getElementById(`${kind}-card`);
+            const valEl = document.getElementById(`${kind}-alt`);
+            const detEl = document.getElementById(`${kind}-details`);
+            if (!row) {
+                if (card) card.innerHTML =
+                    `<span class="alt-label">${kind === 'lowest' ? 'Lowest' : 'Highest'}</span>` +
+                    `<span class="helper-text">No data</span>`;
+                return;
+            }
+            if (valEl) valEl.textContent = formatAlt(row.altitude);
+            if (detEl) detEl.textContent = `${row.callsign || ''} ${row.route || ''}`.trim() || '—';
+        }
+
+        function renderHourBars(hist) {
+            const wrap = document.getElementById('hour-bars');
+            if (!wrap) return;
+            const max = Math.max(1, ...hist);
+            wrap.innerHTML = hist.map((c, h) => {
+                const pct = (c / max) * 100;
+                const h12 = h % 12 || 12;
+                return `
+                    <div class="hour-bar" title="${h12}${h < 12 ? 'a' : 'p'} — ${c}">
+                        <div class="hour-bar-fill" style="height:${pct}%"></div>
+                        <span class="hour-bar-label">${h % 6 === 0 ? h : ''}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadCalendar() {
+            try {
+                const resp = await fetch('/api/calendar?days=90');
+                const data = await resp.json();
+                const wrap = document.getElementById('calendar-heatmap');
+                if (!wrap) return;
+                if (!data.days || !data.days.length) {
+                    wrap.innerHTML = '<p class="helper-text">No data yet.</p>';
+                    return;
+                }
+                const max = Math.max(1, ...data.days.map(d => d.count));
+                // Render as a vertical-week grid (7 rows = days of week, columns = weeks)
+                // Pad start so first column begins on Sunday-of-week-0
+                const days = data.days.slice();
+                const firstDow = new Date(days[0].date + 'T00:00:00').getDay();
+                for (let i = 0; i < firstDow; i++) days.unshift({ date: '', count: -1 });
+                const cells = days.map(d => {
+                    if (d.count < 0) return `<span class="cal-cell cal-empty"></span>`;
+                    const lvl = levelFor(d.count, max);
+                    const title = `${d.date}: ${d.count} flight${d.count === 1 ? '' : 's'}`;
+                    return `<span class="cal-cell cal-l${lvl}" title="${title}"></span>`;
+                }).join('');
+                wrap.innerHTML = cells;
+            } catch (e) {
+                const wrap = document.getElementById('calendar-heatmap');
+                if (wrap) wrap.innerHTML = '<p class="helper-text">Calendar unavailable.</p>';
+            }
+        }
+
+        async function loadOnThisDay() {
+            try {
+                const resp = await fetch('/api/on-this-day');
+                const data = await resp.json();
+                const wrap = document.getElementById('on-this-day');
+                if (!wrap) return;
+                const tiles = [];
+                tiles.push(tile('Today', `${data.today_count}`, data.today_count === 1 ? 'flight' : 'flights'));
+                tiles.push(tile('Streak', `${data.current_streak_days}`, 'day' + (data.current_streak_days === 1 ? '' : 's')));
+                tiles.push(tile('Same date — past years', `${data.history_count}`, 'flights'));
+                if (data.first_seen && data.first_seen.date) {
+                    tiles.push(tile('First ever', data.first_seen.date, data.first_seen.callsign || ''));
+                }
+                wrap.innerHTML = tiles.join('');
+            } catch (e) {
+                // silent
+            }
+        }
+
+        function tile(label, value, sub) {
+            return `
+                <div class="otd-tile">
+                    <span class="otd-label">${escapeHtml(label)}</span>
+                    <span class="otd-value">${escapeHtml(value)}</span>
+                    <span class="otd-sub">${escapeHtml(sub || '')}</span>
+                </div>
+            `;
+        }
+
+        function levelFor(count, max) {
+            if (count <= 0) return 0;
+            const r = count / max;
+            if (r < 0.15) return 1;
+            if (r < 0.40) return 2;
+            if (r < 0.70) return 3;
+            return 4;
+        }
 
         function formatAlt(ft) {
             if (ft == null) return '—';
             return ft >= 1000 ? `${Math.round(ft / 1000)}k ft` : `${ft} ft`;
         }
-        function escapeHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function escapeHtml(s) { return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     </script>
 </body>
 </html>

@@ -17,6 +17,7 @@
             <nav class="page-nav">
                 <a href="/" class="active">Control</a>
                 <a href="/stats">Stats</a>
+                <a href="/health">Health</a>
                 <a href="/settings">Settings</a>
             </nav>
             <div class="header-icon">
@@ -38,6 +39,7 @@
                     <button type="button" class="mode-btn locked" data-mode="arrivals" id="btn-arrivals">Arrivals 🔒</button>
                     <button type="button" class="mode-btn" data-mode="text" id="btn-text">Text</button>
                     <button type="button" class="mode-btn" data-mode="weather" id="btn-weather">Weather</button>
+                    <button type="button" class="mode-btn" data-mode="heatmap" id="btn-heatmap">Heatmap</button>
                     <button type="button" class="mode-btn mode-btn-off" data-mode="blank" id="btn-blank">Off</button>
                 </div>
 
@@ -124,6 +126,14 @@
             </div>
 
             <div id="status-message" class="status-message"></div>
+
+            <div class="card alert-card" id="alert-card" style="display:none;">
+                <div class="alert-header">
+                    <span class="alert-pulse" aria-hidden="true"></span>
+                    <h2 id="alert-title">Special Flight</h2>
+                </div>
+                <div id="alert-body" class="alert-body"></div>
+            </div>
 
             <div class="card flight-card" id="flight-card" style="display:none;">
                 <h2>Now Tracking</h2>

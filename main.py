@@ -665,6 +665,20 @@ def _is_valid_commercial(flight):
     return len(orig) == 3 and len(dest) == 3
 
 
+def _classify_fr24_object(flight) -> str | None:
+    """
+    Same as _classify_special_flight but operates on a raw FR24 flight object,
+    so we can decide *before* fetching detailed route info. Lets us keep the
+    FRG / N/A-route filter for commercial traffic while still surfacing rare
+    aircraft that depart from or arrive at FRG.
+    """
+    if flight is None:
+        return None
+    callsign = (getattr(flight, "callsign", "") or "").strip().upper()
+    aircraft_code = (getattr(flight, "aircraft_code", "") or "").strip().upper()
+    return _classify_special_flight({"callsign": callsign, "aircraft_code": aircraft_code})
+
+
 def fetch_fr24_data():
     """Fetch closest commercial flight within 10km of Farmingdale using FlightRadar24."""
     if not FR24_AVAILABLE or not fr_api:
@@ -679,14 +693,26 @@ def fetch_fr24_data():
         )
         flights = fr_api.get_flights(bounds=bounds)
 
-        # Filter: commercial (origin+dest IATA), altitude >= 2500 ft
+        # Filter:
+        #   - Commercial flights need both origin+dest IATA AND altitude >= 2500 ft
+        #     (drops FRG/local GA noise).
+        #   - Special flights (fighters/warbirds/rare/military) bypass the IATA
+        #     requirement and use a lower 500-ft floor so we still catch them
+        #     departing or arriving at FRG, KFRG pattern work, low passes, etc.
         qualified = []
         for f in flights or []:
-            if not _is_valid_commercial(f):
-                continue
             alt = getattr(f, "altitude", None)
-            if alt is None or (isinstance(alt, (int, float)) and alt < 2500):
+            if alt is None or not isinstance(alt, (int, float)):
                 continue
+            special_reason = _classify_fr24_object(f)
+            if special_reason:
+                if alt < 500:
+                    continue
+            else:
+                if not _is_valid_commercial(f):
+                    continue
+                if alt < 2500:
+                    continue
             qualified.append(f)
 
         if not qualified:

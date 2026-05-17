@@ -71,6 +71,21 @@ def _load_matrix_brightness() -> int:
     return config.MATRIX_BRIGHTNESS
 
 
+def _is_night_dim_active(now=None) -> bool:
+    """True if local time is inside the configured night-dim window."""
+    if not config.NIGHT_DIM_ENABLED:
+        return False
+    start = config.NIGHT_DIM_START_HOUR
+    end = config.NIGHT_DIM_END_HOUR
+    if start == end:
+        return False
+    hour = (now if now is not None else time.localtime()).tm_hour
+    # Window wraps midnight (e.g. 22 → 6) vs straight window (e.g. 1 → 5)
+    if start > end:
+        return hour >= start or hour < end
+    return start <= hour < end
+
+
 # Global Application State
 app_state = {
     "mode": "radius",       # "radius", "monitor", "arrivals", or "text"
@@ -763,6 +778,8 @@ def fetch_fr24_data():
 
         airline_icao = (closest.airline_icao or "").strip().upper()[:3] if closest.airline_icao else ""
 
+        squawk = (str(getattr(closest, "squawk", "") or "")).strip()
+
         _record_health("fr24", True, int((time.time() - t0) * 1000))
         return {
             "callsign": (closest.callsign or "").strip().upper(),
@@ -780,6 +797,7 @@ def fetch_fr24_data():
             "heading": int(getattr(closest, "heading", 0) or 0) % 360,
             "vertical_speed": int(getattr(closest, "vertical_speed", 0) or 0),
             "distance_km": distance_km,
+            "squawk": squawk,
         }
 
     except Exception as e:
@@ -998,6 +1016,44 @@ def _classify_special_flight(flight_data) -> str | None:
     return None
 
 
+def _classify_emergency_squawk(squawk) -> str | None:
+    """Return a reason key like 'emergency-7700' for 7500/7600/7700, else None."""
+    if not squawk:
+        return None
+    code = str(squawk).strip()
+    info = config.EMERGENCY_SQUAWK_REASONS.get(code)
+    if info:
+        return info[0]
+    return None
+
+
+def _record_emergency_alert(flight_data, reason: str):
+    """
+    Force an alert for an emergency squawk. Bypasses the 1-hour debounce so
+    the strobe always fires while the squawk is active, but still rate-limits
+    the Discord post (one per callsign per hour).
+    """
+    callsign = (flight_data.get("callsign") or "").strip().upper() or "?"
+    now = time.time()
+    # Always (re-)arm the active strobe so it persists while squawk holds.
+    special_alert_state["active"][callsign] = {
+        "first": now,
+        "until": now + max(2, config.SPECIAL_ALERT_DURATION),
+        "reason": reason,
+        "flight": dict(flight_data),
+    }
+    # Rate-limit the DB record + Discord post per callsign-per-hour.
+    last = special_alert_state["seen"].get(callsign, 0)
+    if now - last < 3600:
+        return False
+    special_alert_state["seen"][callsign] = now
+    try:
+        db.record_special_alert(flight_data, reason)
+    except Exception as e:
+        logging.warning(f"DB emergency alert write failed: {e}")
+    return True
+
+
 def _record_special_alert_once(flight_data, reason: str) -> bool:
     """
     Trigger an alert for this flight if we haven't recently. Returns True if newly triggered.
@@ -1062,7 +1118,10 @@ def _build_alert_overlay(image: Image.Image, alert: dict, current_time: float) -
         "warbird":       (200, 140,  60),
         "rare-aircraft": ( 80, 220, 255),
     }
-    color = palette.get(reason, (255, 80, 80))
+    if reason.startswith("emergency-"):
+        color = config.EMERGENCY_SQUAWK_COLOR
+    else:
+        color = palette.get(reason, (255, 80, 80))
 
     draw = ImageDraw.Draw(image)
     # Border
@@ -1107,6 +1166,10 @@ def _format_special_alert_for_discord(alert: dict) -> tuple[str, list]:
         "warbird":       "🏛️ Warbird",
         "rare-aircraft": "✨ Rare aircraft",
     }.get(reason, reason)
+    if reason.startswith("emergency-"):
+        code = reason.split("-", 1)[1] if "-" in reason else ""
+        info = config.EMERGENCY_SQUAWK_REASONS.get(code)
+        pretty_reason = info[1] if info else f"🚨 Squawk {code}"
     title = f"Special flight overhead — {pretty_reason}"
     desc = f"**{callsign}**"
     aircraft = f.get("aircraft_model") or f.get("aircraft_code")
@@ -1117,7 +1180,10 @@ def _format_special_alert_for_discord(alert: dict) -> tuple[str, list]:
     if f.get("altitude") is not None:
         alt = f["altitude"]
         desc += f"\nAlt: {alt//1000}k ft" if alt >= 1000 else f"\nAlt: {alt} ft"
-    return title, [{"title": title, "description": desc, "color": 0x4CC2FF}]
+    if reason.startswith("emergency-") and f.get("squawk"):
+        desc += f"\nSquawk: **{f['squawk']}**"
+    embed_color = 0xFF1E1E if reason.startswith("emergency-") else 0x4CC2FF
+    return title, [{"title": title, "description": desc, "color": embed_color}]
 
 
 def _post_daily_summary_if_due():
@@ -1279,7 +1345,28 @@ def _write_env_file(updates: dict) -> None:
         f.write("\n".join(new_lines).rstrip() + "\n")
 
 
-def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -> Image.Image:
+def _draw_tiny_vs_arrow(image: Image.Image, x: int, y: int, climbing: bool, color: tuple):
+    """3×5 px ▲/▼ glyph for the altitude row. x is the leftmost column, y the top row."""
+    draw = ImageDraw.Draw(image)
+    cx = x + 1  # center column of the 3-wide glyph
+    if climbing:
+        draw.point((cx, y),         fill=color)
+        for dx in (-1, 0, 1):
+            draw.point((cx + dx, y + 1), fill=color)
+        draw.point((cx, y + 2),     fill=color)
+        draw.point((cx, y + 3),     fill=color)
+        draw.point((cx, y + 4),     fill=color)
+    else:
+        draw.point((cx, y),         fill=color)
+        draw.point((cx, y + 1),     fill=color)
+        draw.point((cx, y + 2),     fill=color)
+        for dx in (-1, 0, 1):
+            draw.point((cx + dx, y + 3), fill=color)
+        draw.point((cx, y + 4),     fill=color)
+
+
+def _build_flight_image(flight_data, current_time: float, mode_hint: str = "",
+                        special_reason: str | None = None) -> Image.Image:
     """Pixel-perfect 64x32 layout: logo left (0-16) | 4 lines text right (x=19+), FONT_5X8."""
     image = Image.new("RGB", (64, 32), (0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -1344,7 +1431,12 @@ def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -
         alt_color = (0, 220, 0)      # level: steady green
     spd_text = f"{spd_mph}m"
     spd_w = int(draw.textlength(spd_text, font=FONT_5X8))
-    _draw_sharp(image, (TEXT_X, 16), alt_k, FONT_5X8, alt_color)
+    # Optional ▲/▼ glyph (3px wide) prefix when meaningfully climbing/descending.
+    alt_x = TEXT_X
+    if abs(vertical_speed) > 300:
+        _draw_tiny_vs_arrow(image, TEXT_X, 17, vertical_speed > 0, alt_color)
+        alt_x = TEXT_X + 4
+    _draw_sharp(image, (alt_x, 16), alt_k, FONT_5X8, alt_color)
     _draw_sharp(image, (63 - spd_w, 16), spd_text, FONT_5X8, (255, 220, 0))
     alt_spd_text = f"{alt_k} {spd_mph}m"  # kept for line 4 fallback
 
@@ -1368,16 +1460,29 @@ def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -
     else:
         name_line = dest_name if dest_name else ""
 
-    cycle = int(current_time / 12.0) % 2
-    local_time_4 = current_time % 12.0
     aircraft_display = AIRCRAFT_NAMES.get(aircraft_code) or aircraft_code
+
+    # Row-4 cycle: 2 slots normally (aircraft, airport) at 12s each;
+    # 3 slots (aircraft, airport, reason tag) at 8s each when a special flight
+    # is being tracked. Tag color comes from SPECIAL_REASON_COLORS so it reads
+    # as the same "language" as the strobing alert border.
+    reason_color = config.SPECIAL_REASON_COLORS.get(special_reason) if special_reason else None
+    if reason_color:
+        slot_seconds = 8.0
+        slot_count = 3
+    else:
+        slot_seconds = 12.0
+        slot_count = 2
+    cycle = int(current_time / slot_seconds) % slot_count
+    local_time_4 = current_time % slot_seconds
+
     if cycle == 0:
         # Aircraft name (Magenta) or alt/speed fallback
         if aircraft_display:
             _draw_scrolling_text(image, aircraft_display, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
         else:
             _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 24, TEXT_W, local_time_4)
-    else:
+    elif cycle == 1:
         # Airport name (Cyan) with arrow prefix, or aircraft/alt fallback
         if name_line:
             _draw_arrow_prefix(image, TEXT_X, 24, name_arrow_up, (0, 220, 255))
@@ -1386,6 +1491,15 @@ def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -
             _draw_scrolling_text(image, aircraft_display, FONT_5X8, (255, 0, 255), TEXT_X, 24, TEXT_W, local_time_4)
         else:
             _draw_scrolling_text(image, alt_spd_text, FONT_5X8, (0, 220, 0), TEXT_X, 24, TEXT_W, local_time_4)
+    else:
+        # Reason tag slot — only reachable when reason_color is set.
+        # Prefer the aircraft_code (e.g. "F22", "B2") when it's a short, recognizable
+        # type designator; otherwise fall back to the reason-keyed label.
+        if aircraft_code and len(aircraft_code) <= 4 and aircraft_code.isalnum():
+            tag_text = aircraft_code
+        else:
+            tag_text = config.SPECIAL_REASON_TAGS.get(special_reason, "SPECIAL")
+        _draw_scrolling_text(image, tag_text, FONT_5X8, reason_color, TEXT_X, 24, TEXT_W, local_time_4)
 
     # --- Left zone: airline logo (0-16), vertically centered at y=8 ---
     icao_code = (flight_data.get("airline_icao") or callsign[:3] or "").upper()[:3]
@@ -1427,6 +1541,11 @@ def _build_flight_image(flight_data, current_time: float, mode_hint: str = "") -
     _CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     cardinal = _CARDINALS[int((heading + 22.5) / 45) % 8]
     _draw_sharp(image, (1, 25), cardinal, FONT_THUMB, (0, 180, 200))
+
+    # --- Persistent cool-aircraft accent: 1-px stripe at x=17 (gap col) ---
+    if reason_color:
+        for sy in range(0, 32):
+            draw.point((17, sy), fill=reason_color)
 
     return image
 
@@ -1787,6 +1906,23 @@ def led_daemon_loop():
                                 _discord_post("", embeds=embeds)
                             except Exception as e:
                                 logging.warning(f"discord alert failed: {e}")
+                    # Emergency squawk detection (always strobes, debounced Discord)
+                    emergency_reason = _classify_emergency_squawk(flight_data.get("squawk"))
+                    if emergency_reason:
+                        newly_alerted = _record_emergency_alert(flight_data, emergency_reason)
+                        if newly_alerted:
+                            logging.warning(
+                                f"EMERGENCY ALERT [{emergency_reason}] "
+                                f"{flight_data.get('callsign')} squawk={flight_data.get('squawk')}"
+                            )
+                            if config.DISCORD_ALERT_SPECIAL:
+                                try:
+                                    _, embeds = _format_special_alert_for_discord(
+                                        {"reason": emergency_reason, "flight": flight_data}
+                                    )
+                                    _discord_post("", embeds=embeds)
+                                except Exception as e:
+                                    logging.warning(f"discord emergency alert failed: {e}")
                 render_flight = flight_data if flight_data else (
                     app_state["last_seen_flight"] if current_mode == "radius" else None
                 )
@@ -1819,13 +1955,16 @@ def led_daemon_loop():
             poll_start = time.monotonic()
             while time.monotonic() - poll_start < sleep_sec:
                 current_time = time.time()
-                # Apply brightness from app_state (runtime adjustable via Settings)
+                # Apply brightness from app_state, clamped by auto night-dim if active.
                 if matrix:
                     with state_lock:
                         b = app_state.get("matrix_brightness")
                     if b is not None:
                         try:
-                            matrix.brightness = max(1, min(100, int(b)))
+                            target_b = max(1, min(100, int(b)))
+                            if _is_night_dim_active():
+                                target_b = min(target_b, config.NIGHT_DIM_BRIGHTNESS)
+                            matrix.brightness = target_b
                         except (AttributeError, TypeError):
                             pass
                 if current_mode == "blank":
@@ -1842,7 +1981,12 @@ def led_daemon_loop():
                 elif current_mode == "heatmap":
                     frame = _build_heatmap_image(current_time)
                 else:
-                    frame = _build_flight_image(render_flight, current_time, mode_hint=current_mode)
+                    frame_reason = _classify_special_flight(render_flight) if render_flight else None
+                    frame = _build_flight_image(
+                        render_flight, current_time,
+                        mode_hint=current_mode,
+                        special_reason=frame_reason,
+                    )
 
                 # Special-flight alert overlay (any mode that shows a flight)
                 if current_mode in ("radius", "heatmap", "monitor"):

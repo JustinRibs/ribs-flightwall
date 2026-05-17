@@ -132,6 +132,47 @@ FAVORITE_CALLSIGNS = set(_split_csv(os.getenv("FAVORITE_CALLSIGNS", "")))
 # How long the matrix flashes when a special flight enters radius (seconds)
 SPECIAL_ALERT_DURATION = int(os.getenv("SPECIAL_ALERT_DURATION", "20"))
 
+# Reason → RGB color for the persistent accent stripe + row-4 reason tag.
+# Same palette as _build_alert_overlay so the strobe and the steady accent
+# read as the same "language".
+SPECIAL_REASON_COLORS = {
+    "favorite":      (255, 200,   0),
+    "vip":           (255, 255, 255),
+    "military":      (130, 200,  80),
+    "fighter":       (255,  60,  60),
+    "warbird":       (200, 140,  60),
+    "rare-aircraft": (255,   0, 200),
+}
+
+# Short on-matrix tag rendered as the 3rd slot of the row-4 cycle when a
+# special flight is being tracked. Aircraft code (e.g. "F22") wins when
+# available; this is the fallback by reason.
+SPECIAL_REASON_TAGS = {
+    "favorite":      "FAV",
+    "vip":           "VIP",
+    "military":      "MIL",
+    "fighter":       "FTR",
+    "warbird":       "WAR",
+    "rare-aircraft": "RARE",
+}
+
+# Emergency squawk reasons get their own bright-red palette and bypass the
+# 1-hour special-flight debounce.
+EMERGENCY_SQUAWK_COLOR = (255, 30, 30)
+EMERGENCY_SQUAWK_REASONS = {
+    "7500": ("emergency-7500", "🚨 Hijack squawk"),
+    "7600": ("emergency-7600", "🚨 Radio failure squawk"),
+    "7700": ("emergency-7700", "🚨 Emergency squawk"),
+}
+
+# --- Auto night dimming -----------------------------------------------------
+# Clamps matrix brightness during local night-time hours so the board isn't
+# blinding at 2am. Never raises brightness above the user's manual setting.
+NIGHT_DIM_ENABLED = os.getenv("NIGHT_DIM_ENABLED", "1") not in ("0", "false", "False", "")
+NIGHT_DIM_START_HOUR = int(os.getenv("NIGHT_DIM_START_HOUR", "22"))  # 0..23 local
+NIGHT_DIM_END_HOUR = int(os.getenv("NIGHT_DIM_END_HOUR", "6"))       # 0..23 local
+NIGHT_DIM_BRIGHTNESS = max(1, min(100, int(os.getenv("NIGHT_DIM_BRIGHTNESS", "15"))))
+
 # --- Discord ----------------------------------------------------------------
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 DISCORD_DAILY_SUMMARY = os.getenv("DISCORD_DAILY_SUMMARY", "1") not in ("0", "false", "False", "")
